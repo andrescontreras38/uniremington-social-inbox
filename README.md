@@ -41,14 +41,14 @@ Codificada en [`apps/api/src/domain/policy.ts`](apps/api/src/domain/policy.ts).
 
 ## Puesta en marcha
 
-Requiere Node.js 20.12 o superior.
+Requiere Node.js 20.12 o superior y **una base de datos PostgreSQL** — el mismo motor en desarrollo que en producción (lo exige el despliegue serverless en Vercel; Prisma no permite un motor distinto por entorno desde un mismo esquema). La forma más rápida de tener una sin instalar nada: un proyecto gratuito en [Neon](https://neon.tech), copiando la cadena de conexión *pooled*.
 
 ```bash
 npm install
 cp apps/api/.env.example apps/api/.env
 ```
 
-Edite `apps/api/.env` y genere una clave de cifrado propia:
+Edite `apps/api/.env`: pegue su `DATABASE_URL` de Postgres y genere una clave de cifrado propia:
 
 ```bash
 openssl rand -base64 32     # pegue el resultado en ENCRYPTION_KEY
@@ -59,12 +59,12 @@ Después:
 ```bash
 npm run db:migrate          # crea el esquema
 npm run db:seed             # administrador, cuentas de ejemplo y tono institucional
-npm run dev                 # API en :3000, interfaz en :5173
+npm run dev                 # API en :3000, interfaz en :5273
 ```
 
 La contraseña del administrador se imprime **una sola vez** al ejecutar el seed. No hay credenciales por defecto en el código.
 
-Abra <http://localhost:5173>, entre y sincronice una cuenta desde **Cuentas** para ver la bandeja poblada con comentarios de ejemplo.
+Abra <http://localhost:5273>, entre y sincronice una cuenta desde **Cuentas** para ver la bandeja poblada con comentarios de ejemplo.
 
 ### Habilitar la IA
 
@@ -117,15 +117,16 @@ La cuenta de Instagram debe estar en modo profesional y vinculada a la página d
 ## Arquitectura
 
 ```
+api/[...path].ts                Punto de entrada serverless para Vercel (reutiliza buildApp())
 apps/
 ├─ api/                         Fastify 5 + TypeScript + Prisma
-│  ├─ prisma/schema.prisma      Esquema portable SQLite / PostgreSQL
+│  ├─ prisma/schema.prisma      PostgreSQL, igual en desarrollo que en producción
 │  └─ src/
 │     ├─ config/env.ts          Configuración validada con Zod; no arranca si falta algo
 │     ├─ domain/                Enumeraciones, permisos por rol y política de automatización
 │     ├─ lib/                   Cifrado, contraseñas, detección de datos personales, errores
 │     ├─ plugins/               Seguridad HTTP, autenticación, CSRF, manejo de errores
-│     ├─ routes/                Rutas HTTP, una por área
+│     ├─ routes/                Rutas HTTP, una por área (incluye internal.routes.ts para Vercel Cron)
 │     ├─ services/
 │     │  ├─ ai/                 Clasificador y redactor (SDK de Anthropic)
 │     │  ├─ social/             Interfaz SocialProvider + Meta Graph API + proveedor simulado
@@ -134,13 +135,16 @@ apps/
 │     │  └─ audit.ts            Registro de auditoría
 │     └─ jobs/                  Sincronización periódica y purga de retención
 └─ web/                         React 18 + Vite + TanStack Query
+vercel.json                     Build, reescrituras y Cron Jobs para el despliegue en Vercel
 ```
 
 ### Decisiones que conviene conocer
 
 **Capa de proveedores.** Toda la aplicación habla con la interfaz [`SocialProvider`](apps/api/src/services/social/types.ts), nunca con la Graph API directamente. Eso permite desarrollar y demostrar sin credenciales (`SOCIAL_PROVIDER=mock`), cambiar de versión de la Graph API en un solo archivo, y añadir otra red más adelante sin tocar la lógica de negocio.
 
-**Base de datos portable.** El esquema evita enums nativos, arreglos y tipos JSON propios de PostgreSQL. Corre en SQLite para desarrollo y en PostgreSQL en producción cambiando el `provider` en `schema.prisma`. Las enumeraciones se validan en la aplicación con Zod, única fuente de verdad.
+**Base de datos en PostgreSQL, siempre.** El esquema evita enums nativos, arreglos y tipos JSON propios de PostgreSQL: no se ata a el más de lo necesario, aunque no haya otro motor detrás hoy. Las enumeraciones se validan en la aplicación con Zod, única fuente de verdad.
+
+**`buildApp()` separado de `listen()`.** [`apps/api/src/app.ts`](apps/api/src/app.ts) construye la aplicación Fastify sin abrir ningún puerto; [`server.ts`](apps/api/src/server.ts) la levanta como proceso persistente (VPS) y [`api/[...path].ts`](api/[...path].ts) la reutiliza como función serverless (Vercel). Es la misma aplicación en los dos despliegues.
 
 **Sesiones opacas en cookie, no JWT en localStorage.** La cookie es `httpOnly`, así que un XSS no puede leerla; la sesión se revoca al instante desde el servidor; no hay token de larga vida circulando por el navegador. El costo es una consulta por petición, irrelevante en una bandeja de trabajo interna.
 

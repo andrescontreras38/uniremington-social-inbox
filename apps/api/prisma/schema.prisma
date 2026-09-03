@@ -1,19 +1,25 @@
 // Esquema de datos - Bandeja unificada Uniremington
 //
-// Portabilidad: se evitan enums nativos, arreglos y tipos JSON propios de
-// PostgreSQL para que el mismo esquema corra en SQLite (desarrollo) y en
-// PostgreSQL (produccion). Los valores enumerados se validan en la capa de
-// aplicacion con Zod (src/domain/enums.ts), unica fuente de verdad.
+// PostgreSQL, tanto en desarrollo como en produccion: es el motor que exige
+// un despliegue serverless (Vercel no tiene sistema de archivos persistente
+// para un dev.db de SQLite), y Prisma no permite un provider distinto por
+// entorno desde un mismo schema. Se recomienda una base gratuita en Neon con
+// una rama "dev" y otra "prod" bajo el mismo proyecto: local y produccion
+// usan el mismo motor sin tener que instalar Postgres a mano.
 //
-// Para migrar a PostgreSQL: cambiar provider a "postgresql", apuntar
-// DATABASE_URL al servidor y ejecutar: npm run db:migrate
+// Se evitan enums nativos, arreglos y tipos JSON propios de PostgreSQL para
+// no atarse a el mas de lo necesario. Los valores enumerados se validan en la
+// capa de aplicacion con Zod (src/domain/enums.ts), unica fuente de verdad.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "native" para desarrollo local (Windows/Mac/Linux, segun donde se genere);
+  // "rhel-openssl-3.0.x" es el binario que necesita el runtime de Vercel.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

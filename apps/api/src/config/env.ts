@@ -40,7 +40,7 @@ const baseSchema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL es obligatoria'),
 
   /** Origen del frontend autorizado para enviar cookies. Sin comodines. */
-  WEB_ORIGIN: z.string().url().default('http://localhost:5173'),
+  WEB_ORIGIN: z.string().url().default('http://localhost:5273'),
   /** URL publica de la API, usada para construir el callback de webhooks. */
   PUBLIC_API_URL: z.string().url().default('http://localhost:3000'),
 
@@ -127,9 +127,21 @@ const baseSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().min(10).default(300),
   RATE_LIMIT_WINDOW: z.string().default('1 minute'),
 
-  /** Ejecutar los trabajos programados dentro del proceso de la API. */
+  /**
+   * Ejecutar los trabajos programados dentro del proceso de la API
+   * (setInterval). Debe quedar en false en un despliegue serverless (Vercel):
+   * ahi no hay un proceso que siga vivo entre peticiones, y la sincronizacion
+   * y la purga se disparan por HTTP desde Vercel Cron contra /api/internal/*.
+   */
   ENABLE_JOBS: booleanish.default('true'),
   SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(5),
+
+  /**
+   * Secreto compartido que autoriza las rutas /api/internal/*. Las llama un
+   * disparador externo (Vercel Cron u otro programador), no una persona con
+   * sesion, asi que no pueden protegerse con cookies ni CSRF.
+   */
+  CRON_SECRET: z.string().optional(),
 });
 
 const schema = baseSchema.superRefine((env, ctx) => {
@@ -164,6 +176,11 @@ const schema = baseSchema.superRefine((env, ctx) => {
     env.AI_ENABLED,
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_API_KEY es obligatoria cuando AI_ENABLED=true',
+  );
+  requireIn(
+    !env.ENABLE_JOBS,
+    'CRON_SECRET',
+    'CRON_SECRET es obligatorio cuando ENABLE_JOBS=false: sin el, /api/internal/* quedaria sin proteccion',
   );
 
   if (isProd && env.SOCIAL_PROVIDER === 'mock') {

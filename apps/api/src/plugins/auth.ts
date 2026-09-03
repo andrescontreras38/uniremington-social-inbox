@@ -53,6 +53,9 @@ export function registerAuth(app: FastifyInstance): void {
   app.addHook('onRequest', async (request, reply) => {
     if (!UNSAFE_METHODS.has(request.method)) return;
     if (request.url.startsWith('/api/webhooks/')) return;
+    // Los disparadores del programador (Vercel Cron) no son un navegador con
+    // cookies: se autorizan por secreto compartido en internal.routes.ts.
+    if (request.url.startsWith('/api/internal/')) return;
     // El inicio de sesion aun no tiene cookie de sesion, pero si valida Origin.
     const isLogin = request.url === '/api/auth/login';
 

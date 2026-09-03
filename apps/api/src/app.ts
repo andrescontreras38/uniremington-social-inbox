@@ -10,6 +10,7 @@ import { accountRoutes } from './routes/accounts.routes.js';
 import { analyticsRoutes } from './routes/analytics.routes.js';
 import { authRoutes } from './routes/auth.routes.js';
 import { inboxRoutes } from './routes/inbox.routes.js';
+import { internalRoutes } from './routes/internal.routes.js';
 import { alertRoutes, auditRoutes, healthRoutes, toneRoutes } from './routes/misc.routes.js';
 import { templateRoutes } from './routes/templates.routes.js';
 import { replyRoutes } from './routes/replies.routes.js';
@@ -53,6 +54,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(templateRoutes, { prefix: '/api/templates' });
   await app.register(auditRoutes, { prefix: '/api/audit' });
   await app.register(webhookRoutes, { prefix: '/api/webhooks' });
+  await app.register(internalRoutes, { prefix: '/api/internal' });
 
   return app;
 }

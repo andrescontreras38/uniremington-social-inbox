@@ -84,22 +84,26 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
         .send({ error: { code: 'INVALID_SIGNATURE', message: 'Firma invalida' } });
     }
 
-    // Se responde ya. Meta reintenta si la respuesta tarda mas de 20 segundos.
-    reply.status(200).send({ received: true });
-
     const payloadHash = sha256Hex(rawBody);
 
     // Registro idempotente del evento: si el mismo cuerpo llega de nuevo, no
-    // se vuelve a procesar.
+    // se vuelve a procesar. Se responde 200 igual: para Meta el evento ya
+    // esta confirmado, solo que esta vez no hay nada que hacer con el.
     try {
       await prisma.webhookEvent.create({
         data: { provider: 'meta', externalId: payloadHash, payloadHash },
       });
     } catch {
       request.log.info({ payloadHash }, 'Evento de webhook ya recibido; se ignora');
-      return;
+      return reply.status(200).send({ received: true });
     }
 
+    // Se procesa por completo ANTES de responder. En un servidor persistente
+    // podria devolverse el 200 primero y seguir despues; en un entorno
+    // serverless (Vercel) el proceso puede congelarse en cuanto sale la
+    // respuesta, y ese trabajo pendiente se perderia en silencio. Meta
+    // reintenta solo si la respuesta tarda mas de unos 20 segundos, tiempo de
+    // sobra para clasificar los pocos cambios que trae un envio.
     try {
       const interactions = provider.parseWebhook(request.body);
       const summary = await ingestInteractions(interactions);
@@ -119,6 +123,10 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
       });
 
       request.log.error({ err: message }, 'Fallo al procesar el webhook');
+      // Se responde 200 de todas formas: la firma era valida y el evento ya
+      // quedo registrado. Reintentar no arregla un fallo de clasificacion.
     }
+
+    return reply.status(200).send({ received: true });
   });
 }

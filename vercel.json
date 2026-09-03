@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm run db:generate --workspace @uniremington/api && npm run db:deploy --workspace @uniremington/api && npm run build --workspace @uniremington/web",
+  "outputDirectory": "apps/web/dist",
+  "installCommand": "npm install",
+  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
+  "crons": [
+    { "path": "/api/internal/sync", "schedule": "*/5 * * * *" },
+    { "path": "/api/internal/retention", "schedule": "0 3 * * *" }
+  ]
+}

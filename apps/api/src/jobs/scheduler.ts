@@ -17,7 +17,7 @@ const timers: NodeJS.Timeout[] = [];
 let running = false;
 
 /** Evita que dos pasadas se solapen si una tarda mas que el intervalo. */
-async function runExclusive(name: string, task: () => Promise<void>): Promise<void> {
+export async function runExclusive(name: string, task: () => Promise<void>): Promise<void> {
   if (running) {
     logger.debug({ job: name }, 'Trabajo omitido: hay otra pasada en curso');
     return;
@@ -46,7 +46,7 @@ async function runExclusive(name: string, task: () => Promise<void>): Promise<vo
  * Se borran los cerrados que superan la retencion configurada; el registro de
  * auditoria y las metricas agregadas sobreviven porque no contienen el texto.
  */
-async function purgeExpiredData(): Promise<void> {
+export async function purgeExpiredData(): Promise<void> {
   const config = getConfig();
   if (config.DATA_RETENTION_DAYS === 0) return;
 

@@ -1,23 +1,93 @@
 # Despliegue en producción
 
-Cinco días hábiles desde que Uniremington concede el acceso, según el cronograma de la propuesta. Ninguno de estos pasos exige tocar el sitio web ni cambiar de plataforma de publicación.
+Hay dos caminos documentados aquí. **Vercel** es el más rápido de poner en marcha: despliegue automático con cada `git push`, sin servidor propio que mantener. **VPS con systemd** es la alternativa cuando se necesita un proceso persistente propio (por ejemplo, si la sincronización cada 5 minutos importa y no se quiere pagar el plan Pro de Vercel, que es el que permite Cron Jobs más frecuentes que una vez al día).
+
+La base de datos es **PostgreSQL en los dos casos**: SQLite no sirve para Vercel (su sistema de archivos no persiste entre invocaciones) y Prisma no permite un motor distinto por entorno desde un mismo `schema.prisma`, así que se usa Postgres también en desarrollo local. Recomendado: un proyecto gratuito en [Neon](https://neon.tech), con una rama `dev` y otra `prod` bajo el mismo proyecto — así local y producción comparten motor sin instalar Postgres a mano.
 
 ---
 
-## 1. Pasar a PostgreSQL
+## Camino A · Vercel (despliegue automático)
 
-SQLite sirve para desarrollo. En producción, PostgreSQL.
+### A.1 Requisitos previos
 
-En `apps/api/prisma/schema.prisma`:
+Tres cuentas, todas gratuitas para empezar:
 
-```prisma
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+1. **GitHub** — donde vive el código.
+2. **[Neon](https://neon.tech)** — la base de datos Postgres.
+3. **[Vercel](https://vercel.com)** — donde corre la aplicación.
+
+### A.2 Crear la base de datos
+
+En Neon: *New Project* → nombre `uniremington` → se crea automáticamente una rama `main`. Cree una segunda rama `dev` (*Branches* → *Create branch*, a partir de `main`) para desarrollo local, y deje `main` para producción.
+
+De cada rama, copie la cadena de conexión **pooled** (no la directa): Neon la marca como *Pooled connection* en el panel. Cada invocación serverless de Vercel abre su propia conexión a la base; sin *pooling* se agotan rápido.
+
+### A.3 Subir el código a GitHub
+
+En github.com, cree un repositorio vacío (**privado** — el código trae correos y teléfonos reales del personal de las sedes en `apps/api/prisma/data/campus-contacts.json`, y precios reales de matrícula; no son para un repositorio público). No marque "Initialize with README": el proyecto ya tiene uno.
+
+```bash
+git remote add origin https://github.com/<su-usuario>/<su-repo>.git
+git branch -M main
+git push -u origin main
 ```
 
-El esquema ya es portable: no usa enums nativos, arreglos ni tipos JSON propios de PostgreSQL. En el `.env`:
+### A.4 Conectar el proyecto en Vercel
+
+*Add New* → *Project* → importe el repositorio de GitHub. Vercel detecta `vercel.json` en la raíz y usa esa configuración: no hay que tocar el *Framework Preset* ni el *Build Command* a mano.
+
+En **Settings → Environment Variables**, cargue (aplican a Production, Preview y Development salvo que se indique lo contrario):
+
+```env
+NODE_ENV=production
+DATABASE_URL=<cadena pooled de la rama de Neon que corresponda a cada entorno>
+ENCRYPTION_KEY=<32 bytes en base64, generada una sola vez>
+
+# Vercel expone la URL del despliegue en esta variable automatica; aqui se
+# fija a mano porque WEB_ORIGIN y PUBLIC_API_URL deben ser exactos.
+WEB_ORIGIN=https://<su-proyecto>.vercel.app
+PUBLIC_API_URL=https://<su-proyecto>.vercel.app
+
+SOCIAL_PROVIDER=mock          # cambie a "meta" cuando tenga las credenciales
+AI_ENABLED=false              # cambie a "true" cuando tenga la clave de Anthropic
+ANTHROPIC_API_KEY=sk-ant-...  # obligatoria si AI_ENABLED=true
+
+# Obligatorio en Vercel: no hay proceso persistente para el setInterval.
+ENABLE_JOBS=false
+CRON_SECRET=<genere uno largo y aleatorio; Vercel lo agrega solo a los Cron>
+
+SEED_ADMIN_EMAIL=responsable@uniremington.edu.co
+```
+
+`ENABLE_JOBS=false` es obligatorio: sin un proceso que se quede vivo entre peticiones, el `setInterval` de `jobs/scheduler.ts` no tiene dónde correr. `vercel.json` ya trae los dos *Cron Jobs* configurados (`/api/internal/sync` y `/api/internal/retention`) que reemplazan esa sincronización; Vercel les agrega automáticamente el encabezado `Authorization: Bearer <CRON_SECRET>` en cuanto la variable existe en el proyecto — no hay nada más que conectar.
+
+**Límite del plan gratuito:** los *Cron Jobs* del plan Hobby corren como máximo una vez al día. `vercel.json` trae `*/5 * * * *` (cada 5 minutos) para la sincronización, que **exige el plan Pro** (20 USD/mes). Con Hobby, cambie esa línea a `0 */6 * * *` (cada 6 horas) o similar — los comentarios nuevos igual llegan en tiempo real por el *webhook* de Meta; lo que pierde frecuencia es solo la pasada de repaso que detecta lo que el *webhook* no entregó.
+
+Despliegue: *Deploy*. Cada `git push` a `main` desde ahí en adelante despliega solo, incluida la migración de la base (`vercel.json` ejecuta `prisma migrate deploy` como parte del *build*).
+
+### A.5 Primer arranque
+
+Con el proyecto desplegado y `DATABASE_URL` apuntando a la rama de producción:
+
+```bash
+DATABASE_URL="<cadena pooled de la rama prod>" npm run db:seed --workspace @uniremington/api
+DATABASE_URL="<la misma>" npm run db:seed:programs-2026 --workspace @uniremington/api
+DATABASE_URL="<la misma>" npm run db:seed:campus-contacts --workspace @uniremington/api
+```
+
+Anote la contraseña que imprime el primer comando; no vuelve a mostrarse. Después siga la sección **6. Primer arranque** más abajo (cargar tokens de página, sincronizar, crear usuarios) — es igual en los dos caminos de despliegue.
+
+### A.6 Webhook de Meta en Vercel
+
+La URL de devolución de llamada es `https://<su-proyecto>.vercel.app/api/webhooks/meta` (o el dominio propio, si conecta uno en Vercel). El resto es igual a la sección **5. Webhook de Meta**.
+
+---
+
+## Camino B · VPS con systemd
+
+## 1. Base de datos
+
+El esquema ya es portable: no usa enums nativos, arreglos ni tipos JSON propios de PostgreSQL, así que corre igual en cualquier Postgres moderno. En el `.env`:
 
 ```env
 DATABASE_URL="postgresql://usuario:clave@servidor:5432/uniremington?schema=public&sslmode=require"
@@ -51,7 +121,11 @@ META_WEBHOOK_VERIFY_TOKEN=<cadena larga y aleatoria>
 
 AI_ENABLED=true
 ANTHROPIC_API_KEY=sk-ant-...
-AI_MODEL=claude-opus-5
+# Haiku 4.5 en las dos tareas: es el modelo mas economico y alcanza de sobra
+# para clasificar y para redactar tres frases con un reglamento explicito.
+# Vea "Costo de operacion" en el README antes de subir a Sonnet u Opus.
+AI_MODEL_CLASSIFY=claude-haiku-4-5
+AI_MODEL_DRAFT=claude-haiku-4-5
 
 SMTP_HOST=smtp.uniremington.edu.co
 SMTP_PORT=587
@@ -60,6 +134,11 @@ SMTP_PASSWORD=...
 ALERT_RECIPIENTS=comunicaciones@uniremington.edu.co,admisiones@uniremington.edu.co
 
 DATA_RETENTION_DAYS=730
+
+# Deja los trabajos programados corriendo dentro de este mismo proceso
+# (setInterval); es lo correcto en un servidor persistente como este.
+ENABLE_JOBS=true
+SYNC_INTERVAL_MINUTES=5
 ```
 
 La configuración se valida al arrancar. **El proceso no inicia** si falta la clave de cifrado, si el proveedor está en `mock`, o si `PUBLIC_API_URL` no es HTTPS. Es deliberado: fallar al iniciar es mejor que arrancar con un secreto vacío.
