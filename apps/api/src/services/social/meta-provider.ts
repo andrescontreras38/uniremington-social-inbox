@@ -83,6 +83,9 @@ const webhookSchema = z.object({
                 mid: z.string(),
                 text: z.string().optional(),
                 is_echo: z.boolean().optional(),
+                // Solo presente en ecos: que app envio el mensaje en nombre
+                // de la pagina (la nuestra, Meta Business Suite, un CRM...).
+                app_id: z.union([z.string(), z.number()]).optional(),
               })
               .optional(),
           }),
@@ -148,8 +151,28 @@ export class MetaProvider implements SocialProvider {
       }
 
       for (const event of entry.messaging ?? []) {
-        // Los ecos son mensajes enviados por la propia pagina.
-        if (!event.message?.text || event.message.is_echo) continue;
+        if (!event.message?.text) continue;
+
+        if (event.message.is_echo) {
+          // La pagina (esta herramienta, Meta Business Suite o cualquier
+          // otra app conectada, como un CRM) le respondio a alguien. En un
+          // eco, sender/recipient se invierten: sender es la pagina,
+          // recipient es la persona. Se usa para marcar como respondida
+          // toda la conversacion pendiente con esa persona, sin importar
+          // quien haya escrito la respuesta.
+          results.push({
+            provider,
+            accountExternalId: event.sender.id,
+            kind: 'DIRECT_MESSAGE',
+            externalId: event.message.mid,
+            authorExternalId: event.recipient.id,
+            text: event.message.text,
+            remoteCreatedAt: new Date(event.timestamp ?? Date.now()),
+            fromInstitution: true,
+            answeredByApp: event.message.app_id ? String(event.message.app_id) : undefined,
+          });
+          continue;
+        }
 
         results.push({
           provider,

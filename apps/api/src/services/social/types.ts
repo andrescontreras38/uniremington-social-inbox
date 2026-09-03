@@ -32,11 +32,25 @@ export interface NormalizedInteraction {
   remoteCreatedAt: Date;
   post?: NormalizedPost;
   /**
-   * Verdadero cuando la propia institucion escribio el comentario. Sirve para
-   * detectar que el equipo ya respondio desde Meta y dejar de mostrarlo como
-   * pendiente.
+   * Verdadero cuando la propia institucion escribio el comentario o el
+   * mensaje. Sirve para detectar que el caso ya se respondio desde Meta -por
+   * esta herramienta, por Meta Business Suite o por otra app conectada a la
+   * misma pagina, como un CRM- y dejar de mostrarlo como pendiente.
+   *
+   * En un comentario, `parentExternalId` dice cual comentario se respondio.
+   * En un mensaje directo no hay ese enlace: Meta entrega un eco por cada
+   * mensaje que la pagina envia, no una referencia al mensaje del usuario que
+   * lo origino, asi que se usa `authorExternalId` (aqui, el destinatario del
+   * eco) para marcar como respondida toda la conversacion abierta con esa
+   * persona en esa cuenta.
    */
   fromInstitution?: boolean;
+  /**
+   * Que aplicacion envio la respuesta, cuando Meta lo informa (los ecos de
+   * Messenger traen el id de la app). Solo para diagnostico en el registro;
+   * no se persiste en la interaccion.
+   */
+  answeredByApp?: string;
 }
 
 /** Credenciales resueltas de una cuenta, con el token ya descifrado. */

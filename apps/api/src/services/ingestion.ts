@@ -59,6 +59,25 @@ export async function ingestInteractions(
 
 type IngestOutcome = 'created' | 'duplicate' | 'external_answer';
 
+/**
+ * Deja constancia de quien respondio por fuera de esta herramienta.
+ *
+ * Cuando Meta informa que app envio la respuesta (los ecos de Messenger lo
+ * traen), queda en el registro: es lo que permite distinguir, con el tiempo,
+ * "esto lo contesto Meta Business Suite" de "esto lo contesto el CRM
+ * conectado a la misma pagina", sin necesidad de integrarse con ese CRM.
+ */
+function logExternalAnswer(item: NormalizedInteraction): void {
+  logger.info(
+    {
+      kind: item.kind,
+      accountExternalId: item.accountExternalId,
+      appId: item.answeredByApp ?? 'desconocida',
+    },
+    'Caso respondido por fuera de la herramienta',
+  );
+}
+
 async function ingestOne(item: NormalizedInteraction): Promise<IngestOutcome> {
   const account = await prisma.socialAccount.findUnique({
     where: {
@@ -79,10 +98,11 @@ async function ingestOne(item: NormalizedInteraction): Promise<IngestOutcome> {
 
   if (!account.isActive) return 'duplicate';
 
-  // La institucion respondio desde Meta: se marca el comentario padre como ya
-  // atendido en lugar de crear una interaccion nueva.
+  // La institucion (esta herramienta, Meta Business Suite, o cualquier otra
+  // app conectada a la misma pagina, como un CRM) ya respondio desde Meta: se
+  // marca como atendido en lugar de crear una interaccion nueva.
   if (item.fromInstitution) {
-    if (item.parentExternalId) {
+    if (item.kind === 'COMMENT' && item.parentExternalId) {
       const updated = await prisma.interaction.updateMany({
         where: { accountId: account.id, externalId: item.parentExternalId },
         data: {
@@ -91,8 +111,35 @@ async function ingestOne(item: NormalizedInteraction): Promise<IngestOutcome> {
           firstRespondedAt: item.remoteCreatedAt,
         },
       });
-      if (updated.count > 0) return 'external_answer';
+      if (updated.count > 0) {
+        logExternalAnswer(item);
+        return 'external_answer';
+      }
     }
+
+    if (item.kind === 'DIRECT_MESSAGE' && item.authorExternalId) {
+      // Un mensaje directo no trae, como el comentario, una referencia al
+      // mensaje puntual que se respondio: se marca como atendida toda la
+      // conversacion pendiente con esa persona en esta cuenta.
+      const updated = await prisma.interaction.updateMany({
+        where: {
+          accountId: account.id,
+          kind: 'DIRECT_MESSAGE',
+          authorExternalId: item.authorExternalId,
+          status: { in: ['PENDING', 'IN_PROGRESS'] },
+        },
+        data: {
+          answeredExternally: true,
+          status: 'ANSWERED',
+          firstRespondedAt: item.remoteCreatedAt,
+        },
+      });
+      if (updated.count > 0) {
+        logExternalAnswer(item);
+        return 'external_answer';
+      }
+    }
+
     return 'duplicate';
   }
 
