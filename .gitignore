@@ -1,0 +1,20 @@
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+apps/api/prisma/dev.db*
+.DS_Store
+.vscode/
+*.tsbuildinfo
+
+# Documentos fuente con datos reales/confidenciales: no van al repositorio.
+# La informacion que la aplicacion necesita ya esta extraida en
+# apps/api/prisma/data/*.json, que si se versiona.
+PQRS REDES SOCIALES .xlsx
+Propuesta-Uniremington-btodigital.pdf

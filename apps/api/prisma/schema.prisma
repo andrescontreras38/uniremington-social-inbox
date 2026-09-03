@@ -1,0 +1,439 @@
+// Esquema de datos - Bandeja unificada Uniremington
+//
+// Portabilidad: se evitan enums nativos, arreglos y tipos JSON propios de
+// PostgreSQL para que el mismo esquema corra en SQLite (desarrollo) y en
+// PostgreSQL (produccion). Los valores enumerados se validan en la capa de
+// aplicacion con Zod (src/domain/enums.ts), unica fuente de verdad.
+//
+// Para migrar a PostgreSQL: cambiar provider a "postgresql", apuntar
+// DATABASE_URL al servidor y ejecutar: npm run db:migrate
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identidad y acceso
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  name         String
+  passwordHash String
+  // ADMIN | SUPERVISOR | AGENT | VIEWER  (ver src/domain/enums.ts)
+  role         String  @default("AGENT")
+  isActive     Boolean @default(true)
+
+  // Proteccion contra fuerza bruta
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  passwordChangedAt   DateTime  @default(now())
+  mustChangePassword  Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions        Session[]
+  assignedItems   Interaction[] @relation("InteractionAssignee")
+  createdReplies  Reply[]       @relation("ReplyAuthor")
+  approvedReplies Reply[]       @relation("ReplyApprover")
+  auditLogs       AuditLog[]
+
+  @@index([role])
+  @@index([isActive])
+}
+
+model Session {
+  id String @id @default(cuid())
+  // Solo se guarda el hash SHA-256 del token; el token en claro vive
+  // unicamente en la cookie httpOnly del navegador.
+  tokenHash  String    @unique
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ipAddress  String?
+  userAgent  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Cuentas sociales conectadas
+// ---------------------------------------------------------------------------
+
+model SocialAccount {
+  id String @id @default(cuid())
+  // META_FACEBOOK | META_INSTAGRAM
+  provider String
+  // ID de pagina de Facebook o de cuenta profesional de Instagram
+  externalId String
+  name       String
+  // Sede a la que pertenece la cuenta: NACIONAL, MEDELLIN, CALI, BOGOTA...
+  campus String @default("NACIONAL")
+
+  // Token de pagina cifrado con AES-256-GCM (nunca en claro, ni en logs)
+  accessTokenCipher String?
+  tokenExpiresAt    DateTime?
+
+  isActive   Boolean   @default(true)
+  lastSyncAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  posts        Post[]
+  interactions Interaction[]
+  alerts       Alert[]
+
+  @@unique([provider, externalId])
+  @@index([isActive])
+}
+
+model Post {
+  id           String        @id @default(cuid())
+  accountId    String
+  account      SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  externalId   String
+  permalink    String?
+  caption      String?
+  mediaType    String?
+  thumbnailUrl String?
+  publishedAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  interactions Interaction[]
+
+  @@unique([accountId, externalId])
+  @@index([publishedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Interacciones (comentarios y mensajes directos)
+// ---------------------------------------------------------------------------
+
+model Interaction {
+  id        String        @id @default(cuid())
+  accountId String
+  account   SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  postId    String?
+  post      Post?         @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  // COMMENT | DIRECT_MESSAGE
+  kind String
+  // ID del comentario o mensaje en Meta: garantiza idempotencia en la ingesta
+  externalId       String
+  parentExternalId String?
+  permalink        String?
+
+  authorExternalId String?
+  authorName       String?
+  text             String
+  // Huella del texto normalizado: permite reutilizar la clasificacion de un
+  // comentario identico ya visto y ahorrar la llamada al modelo.
+  textHash        String?
+  remoteCreatedAt DateTime
+
+  // Clasificacion asistida por IA
+  // POSITIVE | NEUTRAL | NEGATIVE
+  sentiment String?
+  // QUESTION | COMPLAINT | PRAISE | ENROLLMENT_INTENT | SUPPORT | SPAM | OTHER
+  topic String?
+  // LOW | MEDIUM | HIGH | CRITICAL
+  urgency    String  @default("LOW")
+  confidence Float?
+  summary    String?
+  // Lista separada por comas de banderas de datos personales detectados
+  piiFlags String?
+  // Verdadero cuando la politica obliga revision humana sin excepcion
+  requiresHuman  Boolean   @default(true)
+  classifiedAt   DateTime?
+  classifierNote String?
+  // Como se resolvio: rule (regla local) | reused (comentario identico ya
+  // visto) | model (se pago una llamada) | fallback. Permite medir cuanto
+  // trabajo se esta evitando.
+  classifierSource String?
+  aiInputTokens    Int?
+  aiOutputTokens   Int?
+
+  // PENDING | IN_PROGRESS | ANSWERED | ARCHIVED | HIDDEN
+  status       String    @default("PENDING")
+  assignedToId String?
+  assignedTo   User?     @relation("InteractionAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedAt   DateTime?
+
+  // Respondido directamente desde Meta, detectado en la sincronizacion
+  answeredExternally Boolean   @default(false)
+  isHidden           Boolean   @default(false)
+  hiddenAt           DateTime?
+
+  firstRespondedAt     DateTime?
+  firstResponseSeconds Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  replies Reply[]
+  alerts  Alert[]
+
+  @@unique([accountId, externalId])
+  @@index([status])
+  @@index([sentiment])
+  @@index([topic])
+  @@index([urgency])
+  @@index([assignedToId])
+  @@index([remoteCreatedAt])
+  @@index([textHash])
+}
+
+// ---------------------------------------------------------------------------
+// Respuestas: la IA redacta, una persona aprueba. Sin excepcion.
+// ---------------------------------------------------------------------------
+
+model Reply {
+  id            String      @id @default(cuid())
+  interactionId String
+  interaction   Interaction @relation(fields: [interactionId], references: [id], onDelete: Cascade)
+
+  // DRAFT | PENDING_APPROVAL | APPROVED | PUBLISHED | REJECTED | FAILED
+  status String @default("DRAFT")
+  // AI_DRAFT | HUMAN
+  origin String @default("AI_DRAFT")
+
+  // Texto propuesto por la IA, conservado para auditoria aunque se edite
+  draftText String
+  // Texto final aprobado por una persona; es lo unico publicable
+  finalText String?
+
+  createdById String?
+  createdBy   User?   @relation("ReplyAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Nunca puede ser nulo en una respuesta publicada (invariante del dominio)
+  approvedById String?
+  approvedBy   User?     @relation("ReplyApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  publishedAt     DateTime?
+  externalId      String?
+  rejectionReason String?
+  publishError    String?
+  aiModel         String?
+  aiInputTokens   Int?
+  aiOutputTokens  Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([interactionId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Tono institucional
+// ---------------------------------------------------------------------------
+
+model ToneProfile {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  // Quien es Uniremington, como habla, que no dice, a donde dirige al aspirante
+  content   String
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Alertas y auditoria
+// ---------------------------------------------------------------------------
+
+model Alert {
+  id String @id @default(cuid())
+  // URGENT_INTERACTION | NEGATIVE_SPIKE | PII_DETECTED | PUBLISH_FAILURE
+  type String
+  // INFO | WARNING | CRITICAL
+  severity String @default("WARNING")
+  title    String
+  message  String
+
+  interactionId String?
+  interaction   Interaction?   @relation(fields: [interactionId], references: [id], onDelete: SetNull)
+  accountId     String?
+  account       SocialAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  // OPEN | ACKNOWLEDGED | RESOLVED
+  status         String    @default("OPEN")
+  notifiedAt     DateTime?
+  acknowledgedAt DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id      String  @id @default(cuid())
+  actorId String?
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  // Se conserva el correo aunque el usuario sea eliminado
+  actorEmail String?
+  action     String
+  entityType String
+  entityId   String?
+  // JSON serializado, ya redactado de datos personales
+  metadata  String?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// Idempotencia de la ingesta por webhook
+model WebhookEvent {
+  id          String    @id @default(cuid())
+  provider    String
+  externalId  String
+  payloadHash String
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  error       String?
+
+  @@unique([provider, externalId])
+  @@index([processedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Plantillas de programa
+// ---------------------------------------------------------------------------
+
+/// Datos verificados de un programa academico.
+///
+/// Es la unica fuente que el redactor puede citar para responder por costos,
+/// duracion o requisitos. Sin una plantilla vigente que aplique, la IA no
+/// menciona cifras: remite a admisiones. Eso evita que un valor inventado o
+/// vencido termine publicado en un comentario abierto.
+model ProgramTemplate {
+  id      String @id @default(cuid())
+  name    String
+  /// Ciencias de la Salud, Ciencias Empresariales, Ciencias Contables,
+  /// Ciencias Juridicas y Politicas, Ingenierias, Diseno, Medicina Veterinaria
+  faculty String
+  /// PREGRADO | ESPECIALIZACION | MAESTRIA | TECNOLOGIA
+  level    String @default("PREGRADO")
+  /// PRESENCIAL | DISTANCIA | VIRTUAL | HIBRIDA | COMBINADA
+  modality String @default("PRESENCIAL")
+  /// Sedes donde se ofrece, separadas por coma
+  campuses String @default("NACIONAL")
+
+  /// Valores en pesos colombianos. Nulos mientras Admisiones no los cargue:
+  /// un valor ausente hace que la IA remita en lugar de arriesgar una cifra.
+  semesterValue Int?
+  enrollmentFee Int?
+  /// Texto libre para otros conceptos (carne, seguro, derechos de grado)
+  otherFeesNote String?
+  /// Descuentos vigentes, por ejemplo el 7 % por pronto pago
+  discountNote  String?
+
+  durationSemesters Int?
+  credits           Int?
+  requirements      String?
+
+  /// Contenido descriptivo del programa. Todo esto se le entrega al redactor
+  /// como material citable, asi que una plantilla bien escrita es lo que
+  /// separa una respuesta util de un "escribanos por mensaje directo".
+  /// Titulo que otorga el programa
+  degreeAwarded       String?
+  /// Codigo SNIES del registro calificado
+  sniesCode           String?
+  /// De que se trata el programa, en lenguaje de aspirante
+  description         String?
+  /// Perfil profesional y campo laboral del egresado
+  professionalProfile String?
+  /// Areas o materias destacadas del plan de estudios
+  curriculum          String?
+  /// Horarios y jornadas disponibles
+  scheduleNote        String?
+  /// Pasos para inscribirse y fechas del proceso
+  admissionProcess    String?
+  /// Politica de homologacion de materias cursadas en otra institucion
+  homologationNote    String?
+  /// Preguntas frecuentes propias del programa, en texto libre
+  faq                 String?
+  /// Enlace oficial del programa, para citarlo en la respuesta
+  officialUrl       String?
+
+  /// Vigencia. Una plantilla vencida NO se usa para redactar.
+  validFrom  DateTime?
+  validUntil DateTime?
+
+  /// Falso cuando el valor no debe darse en un comentario publico y hay que
+  /// continuar por mensaje directo.
+  costIsPublic Boolean @default(true)
+
+  notes    String?
+  isActive Boolean @default(true)
+
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// El mismo programa en la misma modalidad puede tener un precio distinto
+  /// por sede (confirmado en los datos reales: Derecho cuesta distinto en
+  /// Bucaramanga que en el resto del pais). La llave unica incluye
+  /// `campuses` para permitir una fila por cada grupo de sedes que comparte
+  /// exactamente el mismo precio y descuento, en vez de forzar un unico
+  /// valor nacional que no existe.
+  @@unique([name, modality, campuses])
+  @@index([faculty])
+  @@index([isActive])
+  @@index([level])
+}
+
+/// Contacto de admisiones de una sede.
+///
+/// Se usa cuando la IA no tiene un dato exacto que citar (o cuando el
+/// costo no puede darse en un comentario publico): en vez del generico
+/// "escriba por mensaje directo", se ofrece el asesor real de la sede que
+/// escribio el comentario, tal como ya lo hace el guion de atencion actual.
+model CampusContact {
+  id      String  @id @default(cuid())
+  /// Debe coincidir (sin distinguir tildes ni mayusculas) con SocialAccount.campus
+  campus  String  @unique
+  director String?
+  address  String?
+  phone    String?
+
+  advisor1Name  String?
+  advisor1Email String?
+  advisor2Name  String?
+  advisor2Email String?
+
+  /// Linea nacional de WhatsApp, cuando la sede no tiene una propia.
+  whatsapp String?
+  /// Verdadero para una sede aliada (sin oferta academica propia en el
+  /// material cargado); solo contacto general.
+  isAlly   Boolean @default(false)
+
+  notes    String?
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
