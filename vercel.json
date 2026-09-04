@@ -4,7 +4,7 @@
   "installCommand": "npm install",
   "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
   "crons": [
-    { "path": "/api/internal/sync", "schedule": "*/5 * * * *" },
+    { "path": "/api/internal/sync", "schedule": "0 7 * * *" },
     { "path": "/api/internal/retention", "schedule": "0 3 * * *" }
   ]
 }
