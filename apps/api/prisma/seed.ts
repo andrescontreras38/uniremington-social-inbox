@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   if (existingAdmin) {
     console.log(`Administrador ya existente: ${ADMIN_EMAIL}`);
   } else {
-    const password = process.env.SEED_ADMIN_PASSWORD ?? randomBytes(12).toString('base64url');
+    const password = process.env.SEED_ADMIN_PASSWORD || randomBytes(12).toString('base64url');
 
     await prisma.user.create({
       data: {
