@@ -17,6 +17,11 @@ import { buildApp } from '../apps/api/src/app.js';
  * La instancia de Fastify se memoriza en el modulo: mientras la funcion siga
  * "caliente" entre invocaciones, no se reconstruye la app ni se abren
  * conexiones nuevas a la base en cada peticion.
+ *
+ * Nombre de archivo fijo (no "[...path].ts"): en este proyecto de Vercel las
+ * rutas catch-all no se enrutan en tiempo de ejecucion (404 aun con la
+ * funcion bien compilada). vercel.json reescribe todo /api/* hacia este
+ * archivo fijo, que si funciona.
  */
 
 let appPromise: ReturnType<typeof buildApp> | null = null;
