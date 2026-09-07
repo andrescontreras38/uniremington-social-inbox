@@ -277,54 +277,66 @@ export async function classifyInteraction(
 
   const model = config.AI_MODEL_CLASSIFY;
 
-  try {
-    const response = await getAnthropic().messages.parse({
-      model,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      // El bloque de sistema es estable, asi que se cachea entre comentarios
-      // en los modelos cuyo prefijo minimo lo permita.
-      system: [{ type: 'text', text: CLASSIFIER_SYSTEM, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: context }],
-      output_config: {
-        format: zodOutputFormat(ClassificationSchema),
-        // Enviar effort a un modelo que no lo admite devuelve error 400.
-        ...(supportsEffort(model) ? { effort: config.AI_CLASSIFY_EFFORT } : {}),
-      },
-    });
-
-    if (response.stop_reason === 'refusal') {
-      const category = response.stop_details?.category ?? null;
-      logger.warn({ category }, 'El modelo declino clasificar; se escala a una persona');
-      return fallbackClassification(input, piiFlags, 'El modelo declino clasificar');
-    }
-
-    const parsed = response.parsed_output;
-    if (!parsed) {
-      return fallbackClassification(input, piiFlags, 'Respuesta del modelo no interpretable');
-    }
-
-    return withPolicy(input, piiFlags, {
-      sentiment: parsed.sentiment,
-      topic: parsed.topic,
-      urgency: parsed.urgency,
-      summary: parsed.summary,
-      confidence: Math.min(Math.max(parsed.confidence, 0), 1),
-      source: 'model',
-      usage: {
+  // Una salida mal formada (el modelo no siguio el esquema al pie de la
+  // letra) es un tropiezo tecnico, no una decision del modelo: se reintenta
+  // una vez con la misma peticion antes de escalar a una persona. Distinto
+  // de una negativa (stop_reason "refusal"), que si es deliberada y nunca se
+  // reintenta.
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await getAnthropic().messages.parse({
         model,
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-      },
-    });
-  } catch (error) {
-    if (error instanceof AiRefusalError) {
-      return fallbackClassification(input, piiFlags, 'El modelo declino clasificar');
-    }
+        max_tokens: MAX_OUTPUT_TOKENS,
+        // El bloque de sistema es estable, asi que se cachea entre comentarios
+        // en los modelos cuyo prefijo minimo lo permita.
+        system: [{ type: 'text', text: CLASSIFIER_SYSTEM, cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: context }],
+        output_config: {
+          format: zodOutputFormat(ClassificationSchema),
+          // Enviar effort a un modelo que no lo admite devuelve error 400.
+          ...(supportsEffort(model) ? { effort: config.AI_CLASSIFY_EFFORT } : {}),
+        },
+      });
 
-    logger.error(
-      { err: error instanceof Error ? error.message : String(error), model },
-      'Fallo la clasificacion con IA',
-    );
-    return fallbackClassification(input, piiFlags, 'Fallo temporal de la clasificacion');
+      if (response.stop_reason === 'refusal') {
+        const category = response.stop_details?.category ?? null;
+        logger.warn({ category }, 'El modelo declino clasificar; se escala a una persona');
+        return fallbackClassification(input, piiFlags, 'El modelo declino clasificar');
+      }
+
+      const parsed = response.parsed_output;
+      if (!parsed) {
+        if (attempt === 0) continue;
+        return fallbackClassification(input, piiFlags, 'Respuesta del modelo no interpretable');
+      }
+
+      return withPolicy(input, piiFlags, {
+        sentiment: parsed.sentiment,
+        topic: parsed.topic,
+        urgency: parsed.urgency,
+        summary: parsed.summary,
+        confidence: Math.min(Math.max(parsed.confidence, 0), 1),
+        source: 'model',
+        usage: {
+          model,
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+        },
+      });
+    } catch (error) {
+      if (error instanceof AiRefusalError) {
+        return fallbackClassification(input, piiFlags, 'El modelo declino clasificar');
+      }
+
+      lastError = error;
+      if (attempt === 0) continue;
+    }
   }
+
+  logger.error(
+    { err: lastError instanceof Error ? lastError.message : String(lastError), model },
+    'Fallo la clasificacion con IA (tras reintento)',
+  );
+  return fallbackClassification(input, piiFlags, 'Fallo temporal de la clasificacion');
 }
