@@ -133,7 +133,7 @@ function Sidebar() {
   return (
     <section id="sidebar">
       <NavLink to="/bandeja" className="brand">
-        <i className="bx bxs-conversation bx-md" aria-hidden="true"></i>
+        <img src="/logo-uniremington.svg" alt="Uniremington" className="brand__logo" />
         <span className="text">Bandeja</span>
       </NavLink>
 

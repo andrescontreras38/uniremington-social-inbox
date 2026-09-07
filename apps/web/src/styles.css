@@ -180,6 +180,13 @@ h3 {
   justify-content: center;
 }
 
+#sidebar .brand__logo {
+  min-width: 60px;
+  height: 26px;
+  width: auto;
+  object-fit: contain;
+}
+
 #sidebar .side-menu {
   width: 100%;
   margin-top: 40px;
@@ -1077,14 +1084,23 @@ tbody tr:hover {
   padding: 32px;
 }
 
+.login__logo {
+  display: block;
+  height: 40px;
+  width: auto;
+  margin: 0 auto 20px;
+}
+
 .login__title {
   margin-bottom: 4px;
+  text-align: center;
 }
 
 .login__subtitle {
   color: var(--dark-grey);
   margin: 0 0 22px;
   font-size: 0.85rem;
+  text-align: center;
 }
 
 /* --- Barras del tablero ------------------------------------------------ */

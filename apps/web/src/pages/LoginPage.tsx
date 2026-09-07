@@ -57,6 +57,7 @@ export function LoginPage() {
   return (
     <div className="login">
       <form className="login__card" onSubmit={handleSubmit} noValidate>
+        <img src="/logo-uniremington.svg" alt="Uniremington" className="login__logo" />
         <h1 className="login__title">Bandeja Uniremington</h1>
         <p className="login__subtitle">
           Comentarios y mensajes de Instagram y Facebook, en un solo lugar.
