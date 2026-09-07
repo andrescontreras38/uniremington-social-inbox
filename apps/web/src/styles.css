@@ -164,6 +164,8 @@ h3 {
   height: 56px;
   display: flex;
   align-items: center;
+  gap: 14px;
+  padding-left: 20px;
   color: var(--blue);
   position: sticky;
   top: 0;
@@ -174,17 +176,14 @@ h3 {
   flex-shrink: 0;
 }
 
-#sidebar .brand .bx {
-  min-width: 60px;
-  display: flex;
-  justify-content: center;
-}
-
 #sidebar .brand__logo {
-  min-width: 60px;
   height: 26px;
   width: auto;
-  object-fit: contain;
+  flex-shrink: 0;
+}
+
+#sidebar.hide .brand__logo {
+  display: none;
 }
 
 #sidebar .side-menu {
