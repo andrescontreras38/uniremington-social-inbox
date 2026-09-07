@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma.js';
 import { textFingerprint } from '../lib/text.js';
 import { classifyInteraction } from './ai/classifier.js';
 import { checkNegativeSpike, createAlert } from './alerts.js';
+import { autoRespond } from './replies.js';
 import type { NormalizedInteraction } from './social/types.js';
 
 /**
@@ -27,6 +28,7 @@ export interface IngestionSummary {
 
 export async function ingestInteractions(
   items: NormalizedInteraction[],
+  options?: { autoRespond?: boolean },
 ): Promise<IngestionSummary> {
   const summary: IngestionSummary = {
     received: items.length,
@@ -38,7 +40,7 @@ export async function ingestInteractions(
 
   for (const item of items) {
     try {
-      const result = await ingestOne(item);
+      const result = await ingestOne(item, options);
       if (result === 'created') summary.created += 1;
       else if (result === 'duplicate') summary.duplicates += 1;
       else summary.externalAnswers += 1;
@@ -78,7 +80,10 @@ function logExternalAnswer(item: NormalizedInteraction): void {
   );
 }
 
-async function ingestOne(item: NormalizedInteraction): Promise<IngestOutcome> {
+async function ingestOne(
+  item: NormalizedInteraction,
+  options?: { autoRespond?: boolean },
+): Promise<IngestOutcome> {
   const account = await prisma.socialAccount.findUnique({
     where: {
       provider_externalId: { provider: item.provider, externalId: item.accountExternalId },
@@ -200,6 +205,19 @@ async function ingestOne(item: NormalizedInteraction): Promise<IngestOutcome> {
     accountName: account.name,
     accountId: account.id,
   });
+
+  if (options?.autoRespond) {
+    try {
+      await autoRespond(created.id);
+    } catch (error) {
+      // Un fallo aqui no debe perder el comentario ya clasificado: queda
+      // pendiente para que una persona lo responda a mano.
+      logger.error(
+        { interactionId: created.id, err: error instanceof Error ? error.message : String(error) },
+        'Fallo la respuesta automatica',
+      );
+    }
+  }
 
   return 'created';
 }

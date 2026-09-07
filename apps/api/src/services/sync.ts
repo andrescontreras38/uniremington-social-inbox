@@ -53,7 +53,13 @@ export async function syncAccount(
     since,
   );
 
-  const summary = await ingestInteractions(interactions);
+  // Solo se responde solo en una pasada normal sobre una cuenta que ya tenia
+  // una sincronizacion previa: ni en la primera carga de una cuenta nueva (30
+  // dias de historico) ni en un pedido explicito de historico (sinceDays),
+  // para no publicar respuestas de la IA a comentarios viejos sin que nadie
+  // lo pidiera.
+  const autoRespond = Boolean(account.lastSyncAt) && !options?.sinceDays;
+  const summary = await ingestInteractions(interactions, { autoRespond });
 
   await prisma.socialAccount.update({
     where: { id: account.id },

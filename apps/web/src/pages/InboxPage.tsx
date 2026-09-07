@@ -626,7 +626,15 @@ function InteractionDetailPanel({
               <li key={reply.id}>
                 <strong>{REPLY_STATUS_LABEL[reply.status] ?? reply.status}</strong>
                 {reply.origin === 'AI_DRAFT' ? ' · borrador de IA' : ' · escrito a mano'}
-                {reply.approvedBy ? ` · aprobo ${reply.approvedBy.name}` : ''}
+                {reply.autoPublished ? (
+                  <Badge tone="info" title="La IA la aprobo y publico sola, sin revision humana">
+                    Automatica
+                  </Badge>
+                ) : reply.approvedBy ? (
+                  ` · aprobo ${reply.approvedBy.name}`
+                ) : (
+                  ''
+                )}
                 {reply.publishedAt ? ` · publicado ${timeAgo(reply.publishedAt)}` : ''}
                 {reply.publishError ? ` · error: ${reply.publishError}` : ''}
               </li>

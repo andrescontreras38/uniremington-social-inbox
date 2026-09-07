@@ -8,20 +8,19 @@ Implementa la propuesta de servicio de btodigital del 25 de agosto de 2026.
 
 ## La regla que no se negocia
 
-**Nada se publica sin que una persona de Uniremington lo lea y lo apruebe.**
+**Reclamos, quejas formales, y cualquier caso con dato personal, financiero o de salud siempre los atiende una persona.** No hay variable de entorno ni configuración que cambie esto: la política en [`apps/api/src/domain/policy.ts`](apps/api/src/domain/policy.ts) los excluye por completo de cualquier respuesta automática, asistida o no.
 
-Es un invariante del sistema, no una casilla de configuración. Se aplica en el servidor, contra el estado leído de la base de datos y no contra lo que envíe el cliente, en [`assertPublishable()`](apps/api/src/services/replies.ts). Nueve pruebas automatizadas lo custodian; si alguna falla, la promesa dejó de cumplirse.
-
-Además, la política acordada excluye por completo de la respuesta asistida:
-
-| Va con respuesta asistida (IA redacta, persona aprueba) | Siempre pasa a una persona |
+| Puede automatizarse | Siempre pasa a una persona, sin excepción |
 | --- | --- |
-| Preguntas de horarios, costos, sedes y fechas | Reclamos y quejas formales, sin excepción |
+| Preguntas de horarios, costos, sedes y fechas | Reclamos y quejas formales |
 | Agradecimientos, felicitaciones y comentarios de grado | Cualquier caso con dato personal, financiero o de salud |
 | Solicitudes que se resuelven con un enlace | Señalamientos, conflictos y todo lo que huela a crisis |
 | Dudas simples sobre un programa o una modalidad | Consultas académicas que exigen el expediente del estudiante |
 
-Codificada en [`apps/api/src/domain/policy.ts`](apps/api/src/domain/policy.ts).
+Para lo que puede automatizarse, el equipo elige el nivel:
+
+- **`AI_AUTO_PUBLISH=false` (por defecto).** La IA redacta, pero nada se publica sin que una persona lea y apruebe el texto exacto que sale. Se comprueba en el servidor, contra el estado leído de la base de datos y no contra lo que envíe el cliente, en [`assertPublishable()`](apps/api/src/services/replies.ts). Nueve pruebas automatizadas protegen esa función; si alguna falla, la promesa dejó de cumplirse.
+- **`AI_AUTO_PUBLISH=true`.** Esos mismos casos se redactan, aprueban y publican solos, sin esperar a una persona. `assertPublishable()` sigue exigiendo un `approvedById` válido igual que siempre — aquí queda apuntando a una cuenta de sistema dedicada, nunca a una persona real, y cada respuesta así queda marcada `autoPublished: true` en la base y en la auditoría: nunca se simula que alguien la revisó.
 
 ---
 

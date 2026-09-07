@@ -74,6 +74,13 @@ const baseSchema = z.object({
 
   ANTHROPIC_API_KEY: z.string().optional(),
   AI_ENABLED: booleanish.default('true'),
+  /**
+   * Publica la respuesta de la IA sin esperar aprobacion humana, solo para
+   * los casos que la politica ya marca sin requiresHuman (domain/policy.ts):
+   * quejas, reclamos y cualquier dato personal, financiero o de salud siguen
+   * yendo siempre a una persona, sin excepcion. Por defecto queda apagado.
+   */
+  AI_AUTO_PUBLISH: booleanish.default('false'),
 
   /**
    * Modelos por tarea.

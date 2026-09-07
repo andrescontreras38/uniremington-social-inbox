@@ -106,7 +106,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     // sobra para clasificar los pocos cambios que trae un envio.
     try {
       const interactions = provider.parseWebhook(request.body);
-      const summary = await ingestInteractions(interactions);
+      const summary = await ingestInteractions(interactions, { autoRespond: true });
 
       await prisma.webhookEvent.update({
         where: { provider_externalId: { provider: 'meta', externalId: payloadHash } },

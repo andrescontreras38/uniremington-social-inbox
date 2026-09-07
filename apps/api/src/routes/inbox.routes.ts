@@ -159,6 +159,7 @@ export async function inboxRoutes(app: FastifyInstance): Promise<void> {
             approvedAt: true,
             createdAt: true,
             aiModel: true,
+            autoPublished: true,
             createdBy: { select: { id: true, name: true } },
             approvedBy: { select: { id: true, name: true } },
           },

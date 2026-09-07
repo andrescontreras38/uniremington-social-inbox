@@ -237,6 +237,11 @@ model Reply {
   aiInputTokens   Int?
   aiOutputTokens  Int?
 
+  // true cuando la aprobacion y publicacion las hizo el sistema (politica de
+  // respuesta automatica), no una persona. approvedById sigue siendo
+  // obligatorio: apunta a la cuenta de sistema, nunca queda vacio.
+  autoPublished Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

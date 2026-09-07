@@ -1,6 +1,9 @@
 import type { Prisma } from '@prisma/client';
+import { randomBytes } from 'node:crypto';
+import { getConfig } from '../config/env.js';
 import { ConflictError, NotFoundError, PolicyViolationError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
+import { hashPassword } from '../lib/password.js';
 import { safeExcerpt, scanPii } from '../lib/pii.js';
 import { prisma } from '../lib/prisma.js';
 import { generateDraft } from './ai/drafter.js';
@@ -464,6 +467,90 @@ export async function publishReply(params: {
 
     logger.error({ replyId: reply.id, err: message }, 'Fallo al publicar la respuesta');
     throw error;
+  }
+}
+
+const SYSTEM_ACTOR_EMAIL = 'sistema-ia@uniremington.edu.co';
+let systemActorPromise: Promise<ActorInfo> | null = null;
+
+/**
+ * Cuenta de sistema que firma la aprobacion y publicacion cuando responde la
+ * IA sin intervencion humana. No es una forma de omitir assertPublishable():
+ * approvedById sigue siendo obligatorio, solo que aqui apunta a esta cuenta
+ * en vez de a una persona, y queda asi en la auditoria (autoPublished: true).
+ * Su contrasena es aleatoria y se descarta: nunca queda un valor con el que
+ * alguien pueda iniciar sesion como ella.
+ */
+async function getSystemActor(): Promise<ActorInfo> {
+  systemActorPromise ??= (async () => {
+    const existing = await prisma.user.findUnique({
+      where: { email: SYSTEM_ACTOR_EMAIL },
+      select: { id: true, email: true, isActive: true },
+    });
+    if (existing) {
+      if (!existing.isActive) {
+        await prisma.user.update({ where: { id: existing.id }, data: { isActive: true } });
+      }
+      return { id: existing.id, email: existing.email };
+    }
+
+    const created = await prisma.user.create({
+      data: {
+        email: SYSTEM_ACTOR_EMAIL,
+        name: 'Sistema (respuesta automatica)',
+        role: 'VIEWER',
+        passwordHash: await hashPassword(randomBytes(32).toString('base64url')),
+        isActive: true,
+      },
+      select: { id: true, email: true },
+    });
+    return created;
+  })();
+
+  return systemActorPromise;
+}
+
+/**
+ * Redacta, aprueba y publica sin esperar a una persona. Solo llega aqui una
+ * interaccion que la politica ya marco sin requiresHuman (domain/policy.ts):
+ * quejas, reclamos y cualquier dato personal, financiero o de salud siguen
+ * yendo siempre a una persona, sin excepcion, sea cual sea AI_AUTO_PUBLISH.
+ * Cualquier fallo (redaccion o publicacion) deja el caso pendiente para
+ * revision manual en vez de propagar el error: una respuesta automatica que
+ * falla nunca debe tumbar la ingesta del comentario.
+ */
+export async function autoRespond(
+  interactionId: string,
+): Promise<{ published: boolean; reason?: string }> {
+  if (!getConfig().AI_AUTO_PUBLISH) return { published: false, reason: 'auto_publish_disabled' };
+
+  const interaction = await loadInteraction(interactionId);
+  if (interaction.requiresHuman) return { published: false, reason: 'requires_human' };
+
+  const actor = await getSystemActor();
+
+  let draft: { id: string; text: string };
+  try {
+    draft = await createAiDraft({ interactionId, actor });
+    await prisma.reply.update({ where: { id: draft.id }, data: { autoPublished: true } });
+  } catch (error) {
+    logger.warn(
+      { interactionId, err: error instanceof Error ? error.message : String(error) },
+      'No se pudo redactar la respuesta automatica; queda pendiente para una persona',
+    );
+    return { published: false, reason: 'draft_failed' };
+  }
+
+  try {
+    await approveReply({ replyId: draft.id, actor });
+    await publishReply({ replyId: draft.id, actor });
+    return { published: true };
+  } catch (error) {
+    logger.warn(
+      { interactionId, replyId: draft.id, err: error instanceof Error ? error.message : String(error) },
+      'No se pudo publicar la respuesta automatica; queda pendiente para revision',
+    );
+    return { published: false, reason: 'publish_failed' };
   }
 }
 

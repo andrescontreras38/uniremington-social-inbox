@@ -69,6 +69,7 @@ export interface Reply {
   approvedAt: string | null;
   createdAt: string;
   aiModel: string | null;
+  autoPublished: boolean;
   createdBy: { id: string; name: string } | null;
   approvedBy: { id: string; name: string } | null;
 }
