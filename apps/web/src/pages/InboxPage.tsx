@@ -91,16 +91,14 @@ export function InboxPage() {
 
   const items = listQuery.data?.items ?? [];
 
-  // Si el caso abierto sale de la lista tras un filtro o una accion, se abre
-  // el primero disponible en lugar de dejar el panel vacio.
+  // Solo elige el primero cuando no hay nada seleccionado (carga inicial o
+  // filtro nuevo sin resultados). Si ya hay un caso abierto, se queda ahi
+  // aunque una accion propia (por ejemplo generar un borrador, que cambia el
+  // estado a "En curso") lo saque del filtro actual: cambiar de tarjeta sin
+  // que el usuario lo pida es mas disruptivo que dejarla fuera del filtro.
   useEffect(() => {
-    if (items.length === 0) {
-      setSelectedId(null);
-      return;
-    }
-    if (!selectedId || !items.some((item) => item.id === selectedId)) {
-      setSelectedId(items[0]!.id);
-    }
+    if (selectedId) return;
+    if (items.length > 0) setSelectedId(items[0]!.id);
   }, [items, selectedId]);
 
   function invalidate() {
