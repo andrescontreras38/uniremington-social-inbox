@@ -50,7 +50,8 @@ export function AccountsPage() {
   });
 
   const sync = useMutation({
-    mutationFn: (id: string) => apiFetch(`/accounts/${id}/sync`, { method: 'POST' }),
+    mutationFn: ({ id, sinceDays }: { id: string; sinceDays?: number }) =>
+      apiFetch(`/accounts/${id}/sync`, { method: 'POST', body: sinceDays ? { sinceDays } : {} }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['accounts'] });
       void queryClient.invalidateQueries({ queryKey: ['inbox'] });
@@ -152,10 +153,18 @@ export function AccountsPage() {
                       <div className="toolbar" style={{ gap: 6 }}>
                         <button
                           type="button"
-                          onClick={() => sync.mutate(account.id)}
+                          onClick={() => sync.mutate({ id: account.id })}
                           disabled={sync.isPending || !account.isConnected}
                         >
                           Sincronizar
+                        </button>
+                        <button
+                          type="button"
+                          title="Trae comentarios de hasta 90 dias atras, sin importar la ultima sincronizacion"
+                          onClick={() => sync.mutate({ id: account.id, sinceDays: 90 })}
+                          disabled={sync.isPending || !account.isConnected}
+                        >
+                          Traer historial (90 dias)
                         </button>
                         <button type="button" onClick={() => setRotatingId(account.id)}>
                           Actualizar token

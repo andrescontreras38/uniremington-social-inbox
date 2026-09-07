@@ -69,6 +69,39 @@ export function TopicBadge({ topic }: { topic: string | null }) {
   return <Badge tone={topic === 'ENROLLMENT_INTENT' ? 'info' : 'neutral'}>{TOPIC_LABEL[topic] ?? topic}</Badge>;
 }
 
+/** Circulo con la inicial del autor y la red social como distintivo. */
+export function Avatar({
+  name,
+  provider,
+  size = 'md',
+}: {
+  name: string | null;
+  provider: string;
+  size?: 'sm' | 'md';
+}) {
+  const initial = name?.trim() ? name.trim()[0]!.toUpperCase() : null;
+  const isInstagram = provider === 'META_INSTAGRAM';
+  return (
+    <span className={`avatar avatar--${size} ${isInstagram ? 'avatar--instagram' : 'avatar--facebook'}`}>
+      {initial ?? <i className="bx bx-user" />}
+      <i
+        className={`avatar__network bx bxl-${isInstagram ? 'instagram' : 'facebook-circle'}`}
+        title={isInstagram ? 'Instagram' : 'Facebook'}
+      />
+    </span>
+  );
+}
+
+/** Icono segun el tipo de interaccion: comentario publico o mensaje directo. */
+export function KindIcon({ kind }: { kind: 'COMMENT' | 'DIRECT_MESSAGE' }) {
+  return (
+    <i
+      className={`bx ${kind === 'DIRECT_MESSAGE' ? 'bx-envelope' : 'bx-comment-detail'}`}
+      title={kind === 'DIRECT_MESSAGE' ? 'Mensaje directo' : 'Comentario'}
+    />
+  );
+}
+
 export function Notice({
   kind = 'info',
   children,

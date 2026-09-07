@@ -17,7 +17,10 @@ const FIRST_SYNC_DAYS = 30;
 /** Solape para no perder comentarios que llegaron durante la pasada anterior. */
 const OVERLAP_MINUTES = 10;
 
-export async function syncAccount(accountId: string): Promise<IngestionSummary> {
+export async function syncAccount(
+  accountId: string,
+  options?: { sinceDays?: number },
+): Promise<IngestionSummary> {
   const account = await prisma.socialAccount.findUnique({
     where: { id: accountId },
     select: {
@@ -35,9 +38,14 @@ export async function syncAccount(accountId: string): Promise<IngestionSummary> 
     return { received: 0, created: 0, duplicates: 0, failed: 0, externalAnswers: 0 };
   }
 
-  const since = account.lastSyncAt
-    ? new Date(account.lastSyncAt.getTime() - OVERLAP_MINUTES * 60 * 1000)
-    : new Date(Date.now() - FIRST_SYNC_DAYS * 24 * 60 * 60 * 1000);
+  // sinceDays fuerza una ventana explicita (para traer historico viejo),
+  // ignorando lastSyncAt: sin esto, una cuenta ya sincronizada nunca vuelve a
+  // pedir nada anterior a su ultima pasada.
+  const since = options?.sinceDays
+    ? new Date(Date.now() - options.sinceDays * 24 * 60 * 60 * 1000)
+    : account.lastSyncAt
+      ? new Date(account.lastSyncAt.getTime() - OVERLAP_MINUTES * 60 * 1000)
+      : new Date(Date.now() - FIRST_SYNC_DAYS * 24 * 60 * 60 * 1000);
 
   const provider = getSocialProvider();
   const interactions = await provider.fetchRecentInteractions(

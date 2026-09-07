@@ -880,13 +880,69 @@ tbody tr:hover {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  align-items: baseline;
-  margin-bottom: 4px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.inbox__item-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .inbox__author {
   font-weight: 600;
   font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+  background: var(--blue);
+}
+
+.avatar--md {
+  width: 34px;
+  height: 34px;
+  font-size: 0.9rem;
+}
+
+.avatar--sm {
+  width: 26px;
+  height: 26px;
+  font-size: 0.72rem;
+}
+
+.avatar--instagram {
+  background: linear-gradient(135deg, #f58529, #dd2a7b, #8134af, #515bd4);
+}
+
+.avatar__network {
+  position: absolute;
+  bottom: -3px;
+  right: -3px;
+  font-size: 0.95rem;
+  line-height: 1;
+  background: var(--superficie);
+  border-radius: 50%;
+}
+
+.avatar--instagram .avatar__network {
+  color: #dd2a7b;
+}
+
+.avatar--facebook .avatar__network {
+  color: var(--blue);
 }
 
 .inbox__time {

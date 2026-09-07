@@ -38,6 +38,11 @@ const tokenSchema = z.object({
   tokenExpiresAt: z.coerce.date().optional(),
 });
 
+const syncSchema = z.object({
+  /** Ventana explicita en dias hacia atras; ignora la ultima sincronizacion. */
+  sinceDays: z.coerce.number().int().min(1).max(365).optional(),
+});
+
 /** Proyeccion publica: nunca incluye el token, ni cifrado. */
 const publicSelect = {
   id: true,
@@ -161,11 +166,12 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request) => {
       const { id } = idParams.parse(request.params);
+      const { sinceDays } = syncSchema.parse(request.body ?? {});
 
       const account = await prisma.socialAccount.findUnique({ where: { id }, select: { id: true } });
       if (!account) throw new NotFoundError('Cuenta');
 
-      const summary = await syncAccount(id);
+      const summary = await syncAccount(id, sinceDays ? { sinceDays } : undefined);
       return { summary };
     },
   );

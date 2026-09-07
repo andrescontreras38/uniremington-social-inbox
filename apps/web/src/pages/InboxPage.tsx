@@ -3,12 +3,15 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { apiFetch, ApiError, queryString } from '../api/client';
 import {
+  Avatar,
   Badge,
+  KindIcon,
   Notice,
   SentimentBadge,
   STATUS_LABEL,
   TopicBadge,
   UrgencyBadge,
+  formatDate,
   formatDuration,
   timeAgo,
 } from '../components/ui';
@@ -236,8 +239,14 @@ export function InboxPage() {
                 onClick={() => setSelectedId(item.id)}
               >
                 <div className="inbox__item-head">
-                  <span className="inbox__author">{item.authorName ?? 'Anonimo'}</span>
-                  <span className="inbox__time">{timeAgo(item.remoteCreatedAt)}</span>
+                  <div className="inbox__item-who">
+                    <Avatar name={item.authorName} provider={item.account.provider} size="sm" />
+                    <span className="inbox__author">{item.authorName ?? 'Anonimo'}</span>
+                    <KindIcon kind={item.kind} />
+                  </div>
+                  <span className="inbox__time" title={formatDate(item.remoteCreatedAt)}>
+                    {timeAgo(item.remoteCreatedAt)}
+                  </span>
                 </div>
                 <div className="inbox__text">{item.text}</div>
                 <div className="inbox__tags">
@@ -407,19 +416,25 @@ function InteractionDetailPanel({
     <div className="detail">
       <div className="detail__section">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <h2>{interaction.authorName ?? 'Anonimo'}</h2>
-            <div className="muted" style={{ fontSize: '0.8rem' }}>
-              {interaction.account.name} · {interaction.kind === 'COMMENT' ? 'Comentario' : 'Mensaje directo'} ·{' '}
-              {timeAgo(interaction.remoteCreatedAt)}
-              {interaction.permalink ? (
-                <>
-                  {' · '}
-                  <a href={interaction.permalink} target="_blank" rel="noreferrer noopener">
-                    Ver en la red
-                  </a>
-                </>
-              ) : null}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <Avatar name={interaction.authorName} provider={interaction.account.provider} />
+            <div>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {interaction.authorName ?? 'Anonimo'}
+                <KindIcon kind={interaction.kind} />
+              </h2>
+              <div className="muted" style={{ fontSize: '0.8rem' }}>
+                {interaction.account.name} · {interaction.kind === 'COMMENT' ? 'Comentario' : 'Mensaje directo'}{' '}
+                · <span title={formatDate(interaction.remoteCreatedAt)}>{timeAgo(interaction.remoteCreatedAt)}</span>
+                {interaction.permalink ? (
+                  <>
+                    {' · '}
+                    <a href={interaction.permalink} target="_blank" rel="noreferrer noopener">
+                      Ver en la red
+                    </a>
+                  </>
+                ) : null}
+              </div>
             </div>
           </div>
           <div className="inbox__tags">
