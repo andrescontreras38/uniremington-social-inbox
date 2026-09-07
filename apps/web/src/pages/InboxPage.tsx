@@ -264,6 +264,7 @@ export function InboxPage() {
         <div>
           {selectedId ? (
             <InteractionDetailPanel
+              key={selectedId}
               interactionId={selectedId}
               users={usersQuery.data?.users ?? []}
               currentUserId={user?.id ?? null}
