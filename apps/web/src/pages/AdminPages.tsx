@@ -32,6 +32,8 @@ export function AccountsPage() {
     campus: 'NACIONAL',
     accessToken: '',
   });
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
+  const [newToken, setNewToken] = useState('');
 
   const accountsQuery = useQuery({
     queryKey: ['accounts'],
@@ -52,6 +54,17 @@ export function AccountsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['accounts'] });
       void queryClient.invalidateQueries({ queryKey: ['inbox'] });
+    },
+    onError: capture,
+  });
+
+  const rotateToken = useMutation({
+    mutationFn: ({ id, accessToken }: { id: string; accessToken: string }) =>
+      apiFetch(`/accounts/${id}/token`, { method: 'POST', body: { accessToken } }),
+    onSuccess: () => {
+      setRotatingId(null);
+      setNewToken('');
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
     },
     onError: capture,
   });
@@ -107,13 +120,48 @@ export function AccountsPage() {
                 <td>{account._count.interactions}</td>
                 <td>
                   {can('accounts:write') ? (
-                    <button
-                      type="button"
-                      onClick={() => sync.mutate(account.id)}
-                      disabled={sync.isPending || !account.isConnected}
-                    >
-                      Sincronizar
-                    </button>
+                    rotatingId === account.id ? (
+                      <div className="toolbar" style={{ gap: 6 }}>
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          placeholder="Token de pagina"
+                          value={newToken}
+                          onChange={(event) => setNewToken(event.target.value)}
+                          style={{ minWidth: 180 }}
+                        />
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={rotateToken.isPending || newToken.length < 10}
+                          onClick={() => rotateToken.mutate({ id: account.id, accessToken: newToken })}
+                        >
+                          Guardar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRotatingId(null);
+                            setNewToken('');
+                          }}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="toolbar" style={{ gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => sync.mutate(account.id)}
+                          disabled={sync.isPending || !account.isConnected}
+                        >
+                          Sincronizar
+                        </button>
+                        <button type="button" onClick={() => setRotatingId(account.id)}>
+                          Actualizar token
+                        </button>
+                      </div>
+                    )
                   ) : null}
                 </td>
               </tr>

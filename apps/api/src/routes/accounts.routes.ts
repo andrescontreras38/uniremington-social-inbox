@@ -132,6 +132,9 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
         data: {
           accessTokenCipher: encryptSecret(body.accessToken),
           tokenExpiresAt: body.tokenExpiresAt ?? null,
+          // Rotar el token es la forma de reconectar una cuenta desactivada:
+          // no tiene sentido pedir un token nuevo para dejarla inactiva.
+          isActive: true,
         },
       });
 
