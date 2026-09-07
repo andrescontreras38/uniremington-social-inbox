@@ -246,10 +246,15 @@ export class MetaProvider implements SocialProvider {
       ? 'id,permalink,caption,media_type,thumbnail_url,timestamp,comments{id,text,timestamp,username,from,parent_id}'
       : 'id,permalink_url,message,created_time,full_picture,comments.filter(stream){id,message,created_time,from,parent,permalink_url}';
 
+    // "since" no se manda aqui a proposito: en este edge, la Graph API lo
+    // aplica a la fecha de la PUBLICACION, no a la del comentario. Un
+    // comentario nuevo en una publicacion vieja nunca se detectaria. En vez
+    // de eso se piden las publicaciones mas recientes sin filtro de fecha y
+    // se filtra cada comentario por su propia fecha, mas abajo.
     const data = await this.graphGet<{ data?: unknown[] }>(
       `/${account.externalId}/${edge}`,
       account.accessToken,
-      { fields, limit: '25', since: Math.floor(since.getTime() / 1000).toString() },
+      { fields, limit: '25' },
     );
 
     const results: NormalizedInteraction[] = [];
@@ -268,6 +273,9 @@ export class MetaProvider implements SocialProvider {
       for (const rawComment of post.comments?.data ?? []) {
         const comment = rawComment as Record<string, any>;
         const authorId = comment.from?.id ?? comment.username;
+        const remoteCreatedAt = new Date(comment.created_time ?? comment.timestamp ?? Date.now());
+
+        if (remoteCreatedAt < since) continue;
 
         results.push({
           provider: account.provider,
@@ -279,7 +287,7 @@ export class MetaProvider implements SocialProvider {
           authorExternalId: comment.from?.id,
           authorName: comment.from?.name ?? comment.username,
           text: String(comment.message ?? comment.text ?? ''),
-          remoteCreatedAt: new Date(comment.created_time ?? comment.timestamp ?? Date.now()),
+          remoteCreatedAt,
           post: postInfo,
           fromInstitution: authorId === account.externalId,
         });
