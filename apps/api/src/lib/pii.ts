@@ -31,6 +31,17 @@ function normalize(text: string): string {
 const DOCUMENT_RE = /(?<!\d)(?:\d{1,3}[.\s]){1,3}\d{3}(?!\d)|(?<!\d)\d{6,11}(?!\d)/g;
 
 /**
+ * Valor en pesos colombianos: el mismo formato con puntos de una cedula
+ * (25.119.100), asi que un precio verificado que el redactor cita tal cual
+ * quedaria marcado como dato personal y bloqueado en publishReply. Se
+ * retira del texto ANTES de buscar documentos -igual que ya se hace con los
+ * telefonos-, en vez de excluirlo con un lookbehind: un lookbehind solo
+ * protege el inicio del numero, y la busqueda de documentos igual encuentra
+ * una coincidencia mas adentro (p. ej. "119.100" dentro de "$ 25.119.100").
+ */
+const CURRENCY_RE = /\$\s?\d{1,3}(?:[.\s]\d{3})+/g;
+
+/**
  * Telefono colombiano.
  *
  * Se exige una senal inequivoca de que el numero es telefonico: movil que
@@ -138,9 +149,11 @@ export function scanPii(text: string): PiiScan {
   }
   CARD_RE.lastIndex = 0;
 
-  // Los documentos se buscan sobre el texto sin telefonos ya reconocidos.
-  const withoutPhones = withoutEmails.replace(PHONE_RE, ' ');
+  // Los documentos se buscan sobre el texto sin telefonos ni valores en
+  // pesos ya reconocidos.
+  const withoutPhones = withoutEmails.replace(PHONE_RE, ' ').replace(CURRENCY_RE, ' ');
   PHONE_RE.lastIndex = 0;
+  CURRENCY_RE.lastIndex = 0;
   const documents = withoutPhones.match(DOCUMENT_RE) ?? [];
   if (documents.some((match) => match.replace(/\D/g, '').length >= 6)) {
     flags.add('DOCUMENT_ID');
