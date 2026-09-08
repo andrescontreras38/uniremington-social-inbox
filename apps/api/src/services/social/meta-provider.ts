@@ -251,47 +251,63 @@ export class MetaProvider implements SocialProvider {
     // comentario nuevo en una publicacion vieja nunca se detectaria. En vez
     // de eso se piden las publicaciones mas recientes sin filtro de fecha y
     // se filtra cada comentario por su propia fecha, mas abajo.
-    const data = await this.graphGet<{ data?: unknown[] }>(
-      `/${account.externalId}/${edge}`,
-      account.accessToken,
-      { fields, limit: '25' },
-    );
+    //
+    // Se pagina hasta MAX_PAGES: una pagina publicaciones (100, el maximo de
+    // este edge) alcanza sobra para una cuenta que casi no publica, pero una
+    // universidad activa agota eso en un par de meses, y un comentario nuevo
+    // en una publicacion mas vieja que la ventana revisada quedaria invisible
+    // para siempre.
+    const MAX_PAGES = 3;
+    type PostsPage = { data?: unknown[]; paging?: { next?: string } };
+
+    let page = await this.graphGet<PostsPage>(`/${account.externalId}/${edge}`, account.accessToken, {
+      fields,
+      limit: '100',
+    });
 
     const results: NormalizedInteraction[] = [];
+    let pagesFetched = 0;
 
-    for (const rawPost of data.data ?? []) {
-      const post = rawPost as Record<string, any>;
-      const postInfo = {
-        externalId: String(post.id),
-        permalink: post.permalink ?? post.permalink_url,
-        caption: post.caption ?? post.message,
-        mediaType: post.media_type,
-        thumbnailUrl: post.thumbnail_url ?? post.full_picture,
-        publishedAt: post.timestamp ?? post.created_time ? new Date(post.timestamp ?? post.created_time) : undefined,
-      };
+    while (true) {
+      for (const rawPost of page.data ?? []) {
+        const post = rawPost as Record<string, any>;
+        const postInfo = {
+          externalId: String(post.id),
+          permalink: post.permalink ?? post.permalink_url,
+          caption: post.caption ?? post.message,
+          mediaType: post.media_type,
+          thumbnailUrl: post.thumbnail_url ?? post.full_picture,
+          publishedAt:
+            post.timestamp ?? post.created_time ? new Date(post.timestamp ?? post.created_time) : undefined,
+        };
 
-      for (const rawComment of post.comments?.data ?? []) {
-        const comment = rawComment as Record<string, any>;
-        const authorId = comment.from?.id ?? comment.username;
-        const remoteCreatedAt = new Date(comment.created_time ?? comment.timestamp ?? Date.now());
+        for (const rawComment of post.comments?.data ?? []) {
+          const comment = rawComment as Record<string, any>;
+          const authorId = comment.from?.id ?? comment.username;
+          const remoteCreatedAt = new Date(comment.created_time ?? comment.timestamp ?? Date.now());
 
-        if (remoteCreatedAt < since) continue;
+          if (remoteCreatedAt < since) continue;
 
-        results.push({
-          provider: account.provider,
-          accountExternalId: account.externalId,
-          kind: 'COMMENT',
-          externalId: String(comment.id),
-          parentExternalId: comment.parent?.id ?? comment.parent_id,
-          permalink: comment.permalink_url,
-          authorExternalId: comment.from?.id,
-          authorName: comment.from?.name ?? comment.username,
-          text: String(comment.message ?? comment.text ?? ''),
-          remoteCreatedAt,
-          post: postInfo,
-          fromInstitution: authorId === account.externalId,
-        });
+          results.push({
+            provider: account.provider,
+            accountExternalId: account.externalId,
+            kind: 'COMMENT',
+            externalId: String(comment.id),
+            parentExternalId: comment.parent?.id ?? comment.parent_id,
+            permalink: comment.permalink_url,
+            authorExternalId: comment.from?.id,
+            authorName: comment.from?.name ?? comment.username,
+            text: String(comment.message ?? comment.text ?? ''),
+            remoteCreatedAt,
+            post: postInfo,
+            fromInstitution: authorId === account.externalId,
+          });
+        }
       }
+
+      pagesFetched += 1;
+      if (!page.paging?.next || pagesFetched >= MAX_PAGES) break;
+      page = await this.graphGetPage<PostsPage>(page.paging.next);
     }
 
     return results.filter((item) => item.text.trim().length > 0);
@@ -358,6 +374,22 @@ export class MetaProvider implements SocialProvider {
     });
 
     return this.handleResponse<T>(response.statusCode, await response.body.json(), path);
+  }
+
+  /**
+   * Sigue el cursor de paginacion que la Graph API devuelve en paging.next:
+   * ya es una URL absoluta con el token incluido, asi que nunca se registra
+   * completa (solo un marcador fijo, igual que el resto de las llamadas).
+   */
+  private async graphGetPage<T>(nextUrl: string): Promise<T> {
+    const response = await request(nextUrl, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      headersTimeout: 15_000,
+      bodyTimeout: 15_000,
+    });
+
+    return this.handleResponse<T>(response.statusCode, await response.body.json(), '(paginacion)');
   }
 
   private async graphPost<T>(
