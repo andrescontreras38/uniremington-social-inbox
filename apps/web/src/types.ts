@@ -89,6 +89,8 @@ export interface Interaction {
   requiresHuman: boolean;
   status: InteractionStatus;
   isHidden: boolean;
+  /** true si la IA aprobo y publico la respuesta sola, sin intervencion humana. */
+  autoAnswered: boolean;
   answeredExternally: boolean;
   assignedAt: string | null;
   firstResponseSeconds: number | null;

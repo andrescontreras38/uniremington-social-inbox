@@ -32,6 +32,8 @@ const listQuerySchema = z.object({
   /** "me" filtra por el usuario autenticado; un cuid, por esa persona. */
   assignedTo: z.union([z.literal('me'), z.literal('unassigned'), z.string().cuid()]).optional(),
   requiresHuman: z.enum(['true', 'false']).optional(),
+  /** Solo casos que la IA aprobo y publico sola, sin intervencion humana. */
+  autoAnswered: z.enum(['true']).optional(),
   search: z.string().max(200).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
@@ -72,6 +74,8 @@ const listSelect = {
   assignedTo: { select: { id: true, name: true } },
   post: { select: { id: true, permalink: true, caption: true, thumbnailUrl: true } },
   _count: { select: { replies: true } },
+  // Solo para derivar autoAnswered en la respuesta; no se expone tal cual.
+  replies: { where: { autoPublished: true }, select: { id: true }, take: 1 },
 } satisfies Prisma.InteractionSelect;
 
 export async function inboxRoutes(app: FastifyInstance): Promise<void> {
@@ -87,6 +91,7 @@ export async function inboxRoutes(app: FastifyInstance): Promise<void> {
       ...(query.kind ? { kind: query.kind } : {}),
       ...(query.accountId ? { accountId: query.accountId } : {}),
       ...(query.requiresHuman ? { requiresHuman: query.requiresHuman === 'true' } : {}),
+      ...(query.autoAnswered ? { replies: { some: { autoPublished: true } } } : {}),
       ...(query.assignedTo === 'me'
         ? { assignedToId: user.id }
         : query.assignedTo === 'unassigned'
@@ -125,7 +130,7 @@ export async function inboxRoutes(app: FastifyInstance): Promise<void> {
     ]);
 
     return {
-      items,
+      items: items.map(({ replies, ...item }) => ({ ...item, autoAnswered: replies.length > 0 })),
       pagination: {
         page: query.page,
         pageSize: query.pageSize,
@@ -333,7 +338,11 @@ export async function inboxRoutes(app: FastifyInstance): Promise<void> {
         select: listSelect,
       });
 
-      return { interaction: updated };
+      return {
+        interaction: updated
+          ? (({ replies, ...item }) => ({ ...item, autoAnswered: replies.length > 0 }))(updated)
+          : null,
+      };
     },
   );
 }

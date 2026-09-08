@@ -41,6 +41,7 @@ interface Filters {
   accountId: string;
   assignedTo: string;
   search: string;
+  autoAnswered: string;
 }
 
 const EMPTY_FILTERS: Filters = {
@@ -51,6 +52,7 @@ const EMPTY_FILTERS: Filters = {
   accountId: '',
   assignedTo: '',
   search: '',
+  autoAnswered: '',
 };
 
 export function InboxPage() {
@@ -140,6 +142,28 @@ export function InboxPage() {
         </div>
 
         <div className="field">
+          <label htmlFor="f-auto">Respuesta</label>
+          <select
+            id="f-auto"
+            value={filters.autoAnswered}
+            onChange={(event) => {
+              const autoAnswered = event.target.value;
+              // Un caso automatico ya quedo "Respondido"; si el filtro de
+              // estado seguia en "Pendientes" no iba a aparecer nunca. Al
+              // pedir solo automaticas se limpia esa combinacion imposible.
+              setFilters({
+                ...filters,
+                autoAnswered,
+                status: autoAnswered && filters.status === 'PENDING' ? '' : filters.status,
+              });
+            }}
+          >
+            <option value="">Cualquiera</option>
+            <option value="true">Solo automáticas (IA sola)</option>
+          </select>
+        </div>
+
+        <div className="field">
           <label htmlFor="f-urgency">Urgencia</label>
           <select
             id="f-urgency"
@@ -225,7 +249,9 @@ export function InboxPage() {
               No hay interacciones con estos filtros.
               <br />
               <span className="muted">
-                Si acaba de conectar una cuenta, sincronicela desde Cuentas.
+                {filters.status === 'PENDING'
+                  ? 'Un caso que la IA ya respondio sola pasa a "Respondido": cambie el filtro Estado para verlo.'
+                  : 'Si acaba de conectar una cuenta, sincronicela desde Cuentas.'}
               </span>
             </div>
           ) : (
@@ -251,6 +277,11 @@ export function InboxPage() {
                   <UrgencyBadge urgency={item.urgency} />
                   <TopicBadge topic={item.topic} />
                   <SentimentBadge sentiment={item.sentiment} />
+                  {item.autoAnswered ? (
+                    <Badge tone="info" title="La IA la aprobo y publico sola, sin revision humana">
+                      Automática
+                    </Badge>
+                  ) : null}
                   {item.requiresHuman ? <Badge tone="warning">Atiende una persona</Badge> : null}
                   {item.isHidden ? <Badge tone="negative">Oculto</Badge> : null}
                   {item.assignedTo ? <Badge>{item.assignedTo.name}</Badge> : null}
