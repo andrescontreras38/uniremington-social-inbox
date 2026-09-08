@@ -1,10 +1,8 @@
-import { z } from 'zod';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getConfig } from '../config/env.js';
 import { safeCompare } from '../lib/crypto.js';
 import { purgeExpiredData, runExclusive } from '../jobs/scheduler.js';
 import { syncAllAccounts } from '../services/sync.js';
-import { autoRespond } from '../services/replies.js';
 
 /**
  * Disparadores para un programador externo (Vercel Cron u otro).
@@ -62,17 +60,5 @@ export async function internalRoutes(app: FastifyInstance): Promise<void> {
     await runExclusive('retention', purgeExpiredData);
 
     return reply.send({ ok: true });
-  });
-
-  // Temporal: fuerza autoRespond() sobre una interaccion puntual, para
-  // probar el ciclo completo (redactar, aprobar, publicar como sistema) sin
-  // esperar a que llegue por webhook o sync. Se retira despues del uso.
-  app.post('/auto-respond-test', async (request, reply) => {
-    if (!requireCronSecret(request, reply)) return;
-
-    const { interactionId } = z.object({ interactionId: z.string().cuid() }).parse(request.body);
-    const result = await autoRespond(interactionId);
-
-    return reply.send(result);
   });
 }
