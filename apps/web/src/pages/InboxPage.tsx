@@ -438,6 +438,9 @@ function InteractionDetailPanel({
   }
 
   const activeReply = interaction.replies.find((reply) => reply.id === activeReplyId) ?? null;
+  // La mas reciente ya publicada: es lo primero que alguien quiere ver al
+  // abrir un caso ya cerrado, sin tener que bajar hasta el Historial.
+  const publishedReply = interaction.replies.find((reply) => reply.status === 'PUBLISHED') ?? null;
   const piiFlags = interaction.piiFlags?.split(',').filter(Boolean) ?? [];
   const busy =
     aiDraft.isPending || manualDraft.isPending || approve.isPending || publish.isPending;
@@ -501,6 +504,31 @@ function InteractionDetailPanel({
           </p>
         ) : null}
       </div>
+
+      {publishedReply ? (
+        <div className="detail__section detail__published">
+          <div className="detail__published-head">
+            <strong>Respuesta publicada</strong>
+            {publishedReply.autoPublished ? (
+              <Badge tone="info" title="La IA la aprobo y publico sola, sin revision humana">
+                Automática
+              </Badge>
+            ) : (
+              <span className="muted" style={{ fontSize: '0.78rem' }}>
+                aprobada por {publishedReply.approvedBy?.name ?? 'un usuario'}
+              </span>
+            )}
+            {publishedReply.publishedAt ? (
+              <span className="muted" style={{ fontSize: '0.78rem' }}>
+                · {timeAgo(publishedReply.publishedAt)}
+              </span>
+            ) : null}
+          </div>
+          <div className="detail__comment detail__comment--reply">
+            {publishedReply.finalText ?? publishedReply.draftText}
+          </div>
+        </div>
+      ) : null}
 
       {message ? <Notice kind={message.kind}>{message.text}</Notice> : null}
 

@@ -1000,6 +1000,18 @@ tbody tr:hover {
   white-space: pre-wrap;
 }
 
+.detail__published-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.detail__comment--reply {
+  background: var(--positivo-fondo);
+  border-left-color: var(--positivo);
+}
+
 .detail__post {
   display: flex;
   gap: 12px;
