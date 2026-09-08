@@ -1010,6 +1010,14 @@ tbody tr:hover {
 .detail__comment--reply {
   background: var(--positivo-fondo);
   border-left-color: var(--positivo);
+  color: var(--dark);
+}
+
+/* Fijo, no via cadena de variables: la caja necesita contraste garantizado
+   en los dos temas, no solo el que herede de --light-green. */
+body.dark .detail__comment--reply {
+  background: #10301f;
+  color: #eafff2;
 }
 
 .detail__post {
