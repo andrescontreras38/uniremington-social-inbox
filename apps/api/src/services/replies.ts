@@ -98,7 +98,17 @@ export async function createAiDraft(params: {
   // aplica, esta vigente y corresponde a la sede que recibio el comentario.
   // Sin esto, el redactor no cita cifras.
   const campus = interaction.account.campus;
-  const templates = await findTemplatesForText(interaction.text, 2, campus);
+  let templates = await findTemplatesForText(interaction.text, 2, campus);
+
+  // El comentario no nombro ningun programa ("esta especialidad", vago): si
+  // la publicacion que responde si los nombra, se busca ahi. Con varios
+  // programas en la misma publicacion se traen todos (hasta 4) para que el
+  // redactor los liste con su propio precio -nunca se adivina cual de ellos
+  // preguntaba la persona.
+  if (templates.length === 0 && interaction.post?.caption) {
+    templates = await findTemplatesForText(interaction.post.caption, 4, campus);
+  }
+
   const verifiedData = buildTemplateContext(
     templates,
     interaction.kind as 'COMMENT' | 'DIRECT_MESSAGE',
