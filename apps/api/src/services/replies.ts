@@ -480,6 +480,15 @@ export async function publishReply(params: {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Entre 15 y 45 segundos, nunca el mismo valor. */
+function randomDelayMs(): number {
+  return 15_000 + Math.floor(Math.random() * 30_000);
+}
+
 const SYSTEM_ACTOR_EMAIL = 'sistema-ia@uniremington.edu.co';
 let systemActorPromise: Promise<ActorInfo> | null = null;
 
@@ -552,6 +561,12 @@ export async function autoRespond(
   }
 
   try {
+    // Publicar al instante es justo el patron que los filtros de spam de
+    // Meta vigilan: una respuesta identica en segundos, con ritmo de bot.
+    // Un retraso corto y variable (nunca el mismo numero de segundos dos
+    // veces) alcanza para no dejar esa huella, sin renunciar a que siga
+    // siendo casi en tiempo real.
+    await sleep(randomDelayMs());
     await approveReply({ replyId: draft.id, actor });
     await publishReply({ replyId: draft.id, actor });
     return { published: true };

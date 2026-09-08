@@ -6,6 +6,9 @@
     { "source": "/api/(.*)", "destination": "/api/handler" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
+  "functions": {
+    "api/handler.ts": { "maxDuration": 60 }
+  },
   "crons": [
     { "path": "/api/internal/sync", "schedule": "0 7 * * *" },
     { "path": "/api/internal/retention", "schedule": "0 3 * * *" }
