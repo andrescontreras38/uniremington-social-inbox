@@ -242,16 +242,25 @@ export class MetaProvider implements SocialProvider {
     return {
       edge: isInstagram ? 'media' : 'posts',
       fields: isInstagram
-        ? 'id,permalink,caption,media_type,thumbnail_url,timestamp,comments{id,text,timestamp,username,from,parent_id}'
-        : 'id,permalink_url,message,created_time,full_picture,comments.filter(stream){id,message,created_time,from,parent,permalink_url}',
+        ? 'id,permalink,caption,media_type,thumbnail_url,timestamp,comments.limit(100){id,text,timestamp,username,from,parent_id}'
+        : 'id,permalink_url,message,created_time,full_picture,comments.filter(stream).limit(100){id,message,created_time,from,parent,permalink_url}',
     };
   }
 
-  /** Convierte una pagina cruda de publicaciones en interacciones normalizadas. */
-  private extractComments(
+  /** Cuantas paginas extra de comentarios se siguen dentro de UN post. */
+  private readonly MAX_COMMENT_PAGES = 15;
+
+  /**
+   * Convierte una pagina cruda de publicaciones en interacciones
+   * normalizadas. Un post activo puede tener mas comentarios de los que trae
+   * el primer lote (100): aqui se sigue la paginacion propia de `comments`
+   * dentro de cada post hasta agotarla, para que ningun comentario viejo de
+   * un post muy comentado quede invisible.
+   */
+  private async extractComments(
     account: AccountCredentials,
     posts: unknown[],
-  ): NormalizedInteraction[] {
+  ): Promise<NormalizedInteraction[]> {
     const results: NormalizedInteraction[] = [];
 
     for (const rawPost of posts) {
@@ -266,7 +275,20 @@ export class MetaProvider implements SocialProvider {
           post.timestamp ?? post.created_time ? new Date(post.timestamp ?? post.created_time) : undefined,
       };
 
-      for (const rawComment of post.comments?.data ?? []) {
+      let comments: unknown[] = post.comments?.data ?? [];
+      let nextCommentsUrl: string | undefined = post.comments?.paging?.next;
+      let pagesFollowed = 0;
+
+      while (nextCommentsUrl && pagesFollowed < this.MAX_COMMENT_PAGES) {
+        const page = await this.graphGetPage<{ data?: unknown[]; paging?: { next?: string } }>(
+          nextCommentsUrl,
+        );
+        comments = comments.concat(page.data ?? []);
+        nextCommentsUrl = page.paging?.next;
+        pagesFollowed += 1;
+      }
+
+      for (const rawComment of comments) {
         const comment = rawComment as Record<string, any>;
         const authorId = comment.from?.id ?? comment.username;
 
@@ -320,7 +342,7 @@ export class MetaProvider implements SocialProvider {
     let pagesFetched = 0;
 
     while (true) {
-      results.push(...this.extractComments(account, page.data ?? []));
+      results.push(...(await this.extractComments(account, page.data ?? [])));
 
       pagesFetched += 1;
       if (!page.paging?.next || pagesFetched >= MAX_PAGES) break;
@@ -349,7 +371,7 @@ export class MetaProvider implements SocialProvider {
         });
 
     return {
-      interactions: this.extractComments(account, page.data ?? []),
+      interactions: await this.extractComments(account, page.data ?? []),
       nextCursor: page.paging?.next ?? null,
     };
   }
