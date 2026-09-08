@@ -104,11 +104,20 @@ export function isValid(
   return true;
 }
 
-/** Verdadero si `campus` aparece en la lista de sedes de la plantilla (o si la plantilla es NACIONAL). */
+/**
+ * Verdadero si `campus` aparece en la lista de sedes de la plantilla, si la
+ * plantilla es NACIONAL, o si la CUENTA que recibio el comentario es la
+ * nacional. Una cuenta de sede (por ejemplo Cali) solo debe citar precios de
+ * su propia sede; la cuenta nacional atiende a cualquiera, asi que una
+ * plantilla propia de una sola sede (ej. una especializacion que solo se
+ * ofrece en Medellin) tambien le sirve -el bloque de contexto sigue
+ * indicando de que sede es cada precio, para que el redactor no los mezcle
+ * si hay mas de una sede con valores distintos.
+ */
 function coversCampus(templateCampuses: string, campus: string | null): boolean {
   const list = templateCampuses.split(',').map((item) => normalize(item));
   if (list.includes('nacional')) return true;
-  if (!campus) return false;
+  if (!campus || normalize(campus) === 'nacional') return true;
   return list.includes(normalize(campus));
 }
 
