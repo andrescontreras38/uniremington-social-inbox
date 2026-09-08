@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { apiFetch, ApiError, queryString } from '../api/client';
 import { Badge, Notice, formatDate } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -34,6 +34,11 @@ export function AccountsPage() {
   });
   const [rotatingId, setRotatingId] = useState<string | null>(null);
   const [newToken, setNewToken] = useState('');
+  const [importingId, setImportingId] = useState<string | null>(null);
+  const [importProgress, setImportProgress] = useState<{ batches: number; imported: number } | null>(
+    null,
+  );
+  const importCancelRef = useRef(false);
 
   const accountsQuery = useQuery({
     queryKey: ['accounts'],
@@ -69,6 +74,40 @@ export function AccountsPage() {
     },
     onError: capture,
   });
+
+  // Encadena lotes de /import-historical hasta que el servidor diga que no
+  // quedan publicaciones mas viejas por revisar (o hasta que se cancele).
+  // Cada lote es una llamada corta; el ciclo completo puede tomar muchas
+  // llamadas si la pagina tiene anos de publicaciones.
+  async function runFullImport(id: string) {
+    importCancelRef.current = false;
+    setImportingId(id);
+    setImportProgress({ batches: 0, imported: 0 });
+    clear();
+
+    try {
+      let done = false;
+      let batches = 0;
+      let imported = 0;
+
+      while (!done && !importCancelRef.current) {
+        const res = await apiFetch<{ summary: { created: number; done: boolean } }>(
+          `/accounts/${id}/import-historical`,
+          { method: 'POST' },
+        );
+        batches += 1;
+        imported += res.summary.created;
+        done = res.summary.done;
+        setImportProgress({ batches, imported });
+      }
+    } catch (err) {
+      capture(err);
+    } finally {
+      setImportingId(null);
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      void queryClient.invalidateQueries({ queryKey: ['inbox'] });
+    }
+  }
 
   return (
     <>
@@ -166,11 +205,31 @@ export function AccountsPage() {
                         >
                           Traer historial (90 dias)
                         </button>
+                        {importingId === account.id ? (
+                          <button type="button" onClick={() => (importCancelRef.current = true)}>
+                            Detener (lote {importProgress?.batches ?? 0} · {importProgress?.imported ?? 0}{' '}
+                            nuevos)
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            title="Revisa TODAS las publicaciones de la cuenta, sin limite de fecha, hasta traer todo lo que exista"
+                            onClick={() => void runFullImport(account.id)}
+                            disabled={importingId !== null || !account.isConnected}
+                          >
+                            Importar todo el historial
+                          </button>
+                        )}
                         <button type="button" onClick={() => setRotatingId(account.id)}>
                           Actualizar token
                         </button>
                       </div>
                     )
+                  ) : null}
+                  {account.historicalImportedAt && importingId !== account.id ? (
+                    <div className="muted" style={{ fontSize: '0.72rem', marginTop: 4 }}>
+                      Historial completo importado el {formatDate(account.historicalImportedAt)}
+                    </div>
                   ) : null}
                 </td>
               </tr>

@@ -236,15 +236,65 @@ export class MetaProvider implements SocialProvider {
     };
   }
 
+  /** Campos del edge de publicaciones/medios, iguales para cualquier lote. */
+  private postsEdge(account: AccountCredentials): { edge: string; fields: string } {
+    const isInstagram = account.provider === 'META_INSTAGRAM';
+    return {
+      edge: isInstagram ? 'media' : 'posts',
+      fields: isInstagram
+        ? 'id,permalink,caption,media_type,thumbnail_url,timestamp,comments{id,text,timestamp,username,from,parent_id}'
+        : 'id,permalink_url,message,created_time,full_picture,comments.filter(stream){id,message,created_time,from,parent,permalink_url}',
+    };
+  }
+
+  /** Convierte una pagina cruda de publicaciones en interacciones normalizadas. */
+  private extractComments(
+    account: AccountCredentials,
+    posts: unknown[],
+  ): NormalizedInteraction[] {
+    const results: NormalizedInteraction[] = [];
+
+    for (const rawPost of posts) {
+      const post = rawPost as Record<string, any>;
+      const postInfo = {
+        externalId: String(post.id),
+        permalink: post.permalink ?? post.permalink_url,
+        caption: post.caption ?? post.message,
+        mediaType: post.media_type,
+        thumbnailUrl: post.thumbnail_url ?? post.full_picture,
+        publishedAt:
+          post.timestamp ?? post.created_time ? new Date(post.timestamp ?? post.created_time) : undefined,
+      };
+
+      for (const rawComment of post.comments?.data ?? []) {
+        const comment = rawComment as Record<string, any>;
+        const authorId = comment.from?.id ?? comment.username;
+
+        results.push({
+          provider: account.provider,
+          accountExternalId: account.externalId,
+          kind: 'COMMENT',
+          externalId: String(comment.id),
+          parentExternalId: comment.parent?.id ?? comment.parent_id,
+          permalink: comment.permalink_url,
+          authorExternalId: comment.from?.id,
+          authorName: comment.from?.name ?? comment.username,
+          text: String(comment.message ?? comment.text ?? ''),
+          remoteCreatedAt: new Date(comment.created_time ?? comment.timestamp ?? Date.now()),
+          post: postInfo,
+          fromInstitution: authorId === account.externalId,
+        });
+      }
+    }
+
+    return results.filter((item) => item.text.trim().length > 0);
+  }
+
   async fetchRecentInteractions(
     account: AccountCredentials,
     since: Date,
   ): Promise<NormalizedInteraction[]> {
-    const isInstagram = account.provider === 'META_INSTAGRAM';
-    const edge = isInstagram ? 'media' : 'posts';
-    const fields = isInstagram
-      ? 'id,permalink,caption,media_type,thumbnail_url,timestamp,comments{id,text,timestamp,username,from,parent_id}'
-      : 'id,permalink_url,message,created_time,full_picture,comments.filter(stream){id,message,created_time,from,parent,permalink_url}';
+    const { edge, fields } = this.postsEdge(account);
 
     // "since" no se manda aqui a proposito: en este edge, la Graph API lo
     // aplica a la fecha de la PUBLICACION, no a la del comentario. Un
@@ -256,7 +306,8 @@ export class MetaProvider implements SocialProvider {
     // este edge) alcanza sobra para una cuenta que casi no publica, pero una
     // universidad activa agota eso en un par de meses, y un comentario nuevo
     // en una publicacion mas vieja que la ventana revisada quedaria invisible
-    // para siempre.
+    // para siempre. Para revisar todo el historico sin este limite, ver
+    // fetchHistoricalBatch.
     const MAX_PAGES = 3;
     type PostsPage = { data?: unknown[]; paging?: { next?: string } };
 
@@ -269,48 +320,38 @@ export class MetaProvider implements SocialProvider {
     let pagesFetched = 0;
 
     while (true) {
-      for (const rawPost of page.data ?? []) {
-        const post = rawPost as Record<string, any>;
-        const postInfo = {
-          externalId: String(post.id),
-          permalink: post.permalink ?? post.permalink_url,
-          caption: post.caption ?? post.message,
-          mediaType: post.media_type,
-          thumbnailUrl: post.thumbnail_url ?? post.full_picture,
-          publishedAt:
-            post.timestamp ?? post.created_time ? new Date(post.timestamp ?? post.created_time) : undefined,
-        };
-
-        for (const rawComment of post.comments?.data ?? []) {
-          const comment = rawComment as Record<string, any>;
-          const authorId = comment.from?.id ?? comment.username;
-          const remoteCreatedAt = new Date(comment.created_time ?? comment.timestamp ?? Date.now());
-
-          if (remoteCreatedAt < since) continue;
-
-          results.push({
-            provider: account.provider,
-            accountExternalId: account.externalId,
-            kind: 'COMMENT',
-            externalId: String(comment.id),
-            parentExternalId: comment.parent?.id ?? comment.parent_id,
-            permalink: comment.permalink_url,
-            authorExternalId: comment.from?.id,
-            authorName: comment.from?.name ?? comment.username,
-            text: String(comment.message ?? comment.text ?? ''),
-            remoteCreatedAt,
-            post: postInfo,
-            fromInstitution: authorId === account.externalId,
-          });
-        }
-      }
+      results.push(...this.extractComments(account, page.data ?? []));
 
       pagesFetched += 1;
       if (!page.paging?.next || pagesFetched >= MAX_PAGES) break;
       page = await this.graphGetPage<PostsPage>(page.paging.next);
     }
 
-    return results.filter((item) => item.text.trim().length > 0);
+    return results.filter((item) => item.remoteCreatedAt >= since);
+  }
+
+  async fetchHistoricalBatch(
+    account: AccountCredentials,
+    cursor: string | null,
+  ): Promise<{ interactions: NormalizedInteraction[]; nextCursor: string | null }> {
+    const { edge, fields } = this.postsEdge(account);
+    type PostsPage = { data?: unknown[]; paging?: { next?: string } };
+
+    // Un solo lote (una pagina de publicaciones): quien llama decide cuantos
+    // lotes encadenar. Sin filtro de fecha -a diferencia de
+    // fetchRecentInteractions, aqui el objetivo es traer TODO, sin importar
+    // que tan viejo sea el comentario.
+    const page = cursor
+      ? await this.graphGetPage<PostsPage>(cursor)
+      : await this.graphGet<PostsPage>(`/${account.externalId}/${edge}`, account.accessToken, {
+          fields,
+          limit: '25',
+        });
+
+    return {
+      interactions: this.extractComments(account, page.data ?? []),
+      nextCursor: page.paging?.next ?? null,
+    };
   }
 
   async publishReply(

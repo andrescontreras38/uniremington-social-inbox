@@ -97,6 +97,12 @@ model SocialAccount {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
+  // Importacion de todo el historico (sin limite de fecha), en lotes:
+  // cursor de paginacion de la Graph API para continuar donde quedo el
+  // ultimo lote. Null significa "sin empezar" o "ya se completo".
+  historicalCursor     String?
+  historicalImportedAt DateTime?
+
   posts        Post[]
   interactions Interaction[]
   alerts       Alert[]

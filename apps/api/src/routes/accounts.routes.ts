@@ -6,7 +6,7 @@ import { NotFoundError } from '../lib/errors.js';
 import { prisma } from '../lib/prisma.js';
 import { auditContextOf, requireUser } from '../plugins/auth.js';
 import { recordAudit } from '../services/audit.js';
-import { syncAccount } from '../services/sync.js';
+import { importHistoricalBatch, syncAccount } from '../services/sync.js';
 
 /**
  * Cuentas conectadas.
@@ -54,6 +54,8 @@ const publicSelect = {
   lastSyncAt: true,
   tokenExpiresAt: true,
   createdAt: true,
+  historicalCursor: true,
+  historicalImportedAt: true,
   _count: { select: { interactions: true } },
 };
 
@@ -172,6 +174,28 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       if (!account) throw new NotFoundError('Cuenta');
 
       const summary = await syncAccount(id, sinceDays ? { sinceDays } : undefined);
+      return { summary };
+    },
+  );
+
+  /**
+   * Un lote de la importacion de todo el historico (sin limite de fecha).
+   * El cliente llama esta ruta repetidas veces hasta que `done` sea
+   * verdadero: cada llamada avanza el cursor guardado en la cuenta.
+   */
+  app.post(
+    '/:id/import-historical',
+    {
+      onRequest: [app.requirePermission('accounts:write')],
+      config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+    },
+    async (request) => {
+      const { id } = idParams.parse(request.params);
+
+      const account = await prisma.socialAccount.findUnique({ where: { id }, select: { id: true } });
+      if (!account) throw new NotFoundError('Cuenta');
+
+      const summary = await importHistoricalBatch(id);
       return { summary };
     },
   );

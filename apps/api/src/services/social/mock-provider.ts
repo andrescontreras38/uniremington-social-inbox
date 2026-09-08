@@ -108,6 +108,14 @@ export class MockProvider implements SocialProvider {
     });
   }
 
+  /** El simulado no tiene historico que rastrear: un lote vacio, ya completo. */
+  async fetchHistoricalBatch(): Promise<{
+    interactions: NormalizedInteraction[];
+    nextCursor: string | null;
+  }> {
+    return { interactions: [], nextCursor: null };
+  }
+
   async publishReply(
     _account: AccountCredentials,
     target: { kind: InteractionKind; externalId: string },

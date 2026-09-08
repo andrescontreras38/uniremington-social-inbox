@@ -88,6 +88,18 @@ export interface SocialProvider {
     since: Date,
   ): Promise<NormalizedInteraction[]>;
 
+  /**
+   * Un lote de la importacion de todo el historico, sin filtro de fecha:
+   * trae cada comentario de una pagina de publicaciones, sea de hoy o de
+   * anos atras. `cursor` es lo que devolvio el lote anterior; null para
+   * empezar desde la publicacion mas reciente. `nextCursor` null significa
+   * que ya no quedan publicaciones mas viejas por revisar.
+   */
+  fetchHistoricalBatch(
+    account: AccountCredentials,
+    cursor: string | null,
+  ): Promise<{ interactions: NormalizedInteraction[]; nextCursor: string | null }>;
+
   /** Publica una respuesta ya aprobada por una persona. */
   publishReply(
     account: AccountCredentials,

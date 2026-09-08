@@ -70,6 +70,60 @@ export async function syncAccount(
   return summary;
 }
 
+export interface HistoricalBatchResult extends IngestionSummary {
+  done: boolean;
+}
+
+/**
+ * Importa un lote de TODO el historico, sin limite de fecha (a diferencia de
+ * syncAccount, que solo mira los ultimos meses). Pensado para llamarse varias
+ * veces seguidas -cada llamada procesa una pagina de publicaciones y avanza
+ * el cursor guardado en la cuenta- hasta que `done` sea verdadero: ahi ya no
+ * quedan publicaciones mas viejas por revisar. Nunca dispara respuesta
+ * automatica: es historico, no algo que nadie esta esperando ahora mismo.
+ */
+export async function importHistoricalBatch(accountId: string): Promise<HistoricalBatchResult> {
+  const account = await prisma.socialAccount.findUnique({
+    where: { id: accountId },
+    select: {
+      id: true,
+      name: true,
+      provider: true,
+      externalId: true,
+      accessTokenCipher: true,
+      isActive: true,
+      historicalCursor: true,
+    },
+  });
+
+  if (!account || !account.isActive) {
+    return { received: 0, created: 0, duplicates: 0, failed: 0, externalAnswers: 0, done: true };
+  }
+
+  const provider = getSocialProvider();
+  const { interactions, nextCursor } = await provider.fetchHistoricalBatch(
+    resolveCredentials(account),
+    account.historicalCursor,
+  );
+
+  const summary = await ingestInteractions(interactions);
+
+  await prisma.socialAccount.update({
+    where: { id: account.id },
+    data: {
+      historicalCursor: nextCursor,
+      historicalImportedAt: nextCursor ? undefined : new Date(),
+    },
+  });
+
+  logger.info(
+    { account: account.name, ...summary, done: !nextCursor },
+    'Lote de importacion historica',
+  );
+
+  return { ...summary, done: !nextCursor };
+}
+
 export async function syncAllAccounts(): Promise<IngestionSummary> {
   const accounts = await prisma.socialAccount.findMany({
     where: { isActive: true, accessTokenCipher: { not: null } },

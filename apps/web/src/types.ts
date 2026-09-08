@@ -124,6 +124,7 @@ export interface SocialAccount {
   isConnected: boolean;
   lastSyncAt: string | null;
   tokenExpiresAt: string | null;
+  historicalImportedAt: string | null;
   createdAt: string;
   _count: { interactions: number };
 }
