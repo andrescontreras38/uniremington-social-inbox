@@ -242,8 +242,8 @@ export class MetaProvider implements SocialProvider {
     return {
       edge: isInstagram ? 'media' : 'posts',
       fields: isInstagram
-        ? 'id,permalink,caption,media_type,thumbnail_url,timestamp,comments.limit(100){id,text,timestamp,username,from,parent_id}'
-        : 'id,permalink_url,message,created_time,full_picture,comments.filter(stream).limit(100){id,message,created_time,from,parent,permalink_url}',
+        ? 'id,permalink,caption,media_type,thumbnail_url,timestamp,comments.limit(25){id,text,timestamp,username,from,parent_id}'
+        : 'id,permalink_url,message,created_time,full_picture,comments.filter(stream).limit(25){id,message,created_time,from,parent,permalink_url}',
     };
   }
 
@@ -324,18 +324,21 @@ export class MetaProvider implements SocialProvider {
     // de eso se piden las publicaciones mas recientes sin filtro de fecha y
     // se filtra cada comentario por su propia fecha, mas abajo.
     //
-    // Se pagina hasta MAX_PAGES: una pagina publicaciones (100, el maximo de
-    // este edge) alcanza sobra para una cuenta que casi no publica, pero una
+    // Se pagina hasta MAX_PAGES paginas de 25 publicaciones (300 en total):
+    // alcanza de sobra para una cuenta que casi no publica, pero una
     // universidad activa agota eso en un par de meses, y un comentario nuevo
     // en una publicacion mas vieja que la ventana revisada quedaria invisible
     // para siempre. Para revisar todo el historico sin este limite, ver
-    // fetchHistoricalBatch.
-    const MAX_PAGES = 3;
+    // fetchHistoricalBatch. El tamano de pagina se mantiene bajo (25, no 100)
+    // porque con los comentarios anidados de cada post, una pagina de 100
+    // publicaciones satura el limite de tamano de respuesta de la Graph API
+    // ("Please reduce the amount of data you're asking for").
+    const MAX_PAGES = 12;
     type PostsPage = { data?: unknown[]; paging?: { next?: string } };
 
     let page = await this.graphGet<PostsPage>(`/${account.externalId}/${edge}`, account.accessToken, {
       fields,
-      limit: '100',
+      limit: '25',
     });
 
     const results: NormalizedInteraction[] = [];
