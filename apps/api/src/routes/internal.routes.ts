@@ -1,10 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { z } from 'zod';
 import { getConfig } from '../config/env.js';
 import { safeCompare } from '../lib/crypto.js';
 import { purgeExpiredData, runExclusive } from '../jobs/scheduler.js';
-import { prisma } from '../lib/prisma.js';
-import { autoRespond } from '../services/replies.js';
 import { syncAllAccounts } from '../services/sync.js';
 
 /**
@@ -63,50 +60,5 @@ export async function internalRoutes(app: FastifyInstance): Promise<void> {
     await runExclusive('retention', purgeExpiredData);
 
     return reply.send({ ok: true });
-  });
-
-  /**
-   * Diagnostico temporal: estado completo de una interaccion (clasificacion,
-   * politica y sus respuestas), sin pasar por sesion de admin. Solo para
-   * depurar por que una interaccion concreta no recibio respuesta automatica.
-   * Quitar despues de usarlo.
-   */
-  app.get('/diagnose-interaction', async (request, reply) => {
-    const diagSecret = process.env.DIAG_SECRET ?? '';
-    const header = request.headers.authorization ?? '';
-    const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
-    if (!diagSecret || !provided || !safeCompare(provided, diagSecret)) {
-      reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Secreto invalido' } });
-      return;
-    }
-
-    const query = z.object({ id: z.string().cuid() }).parse(request.query);
-
-    const interaction = await prisma.interaction.findUnique({
-      where: { id: query.id },
-      include: { replies: true, account: { select: { name: true, provider: true } } },
-    });
-
-    return reply.send({ interaction });
-  });
-
-  /**
-   * Diagnostico temporal: reintenta la respuesta automatica de una
-   * interaccion puntual que quedo clasificada pero sin borrador (la
-   * ingesta normal nunca la reintenta sola porque ya la ve como conocida).
-   * Quitar despues de usarlo.
-   */
-  app.post('/retry-autorespond', async (request, reply) => {
-    const diagSecret = process.env.DIAG_SECRET ?? '';
-    const header = request.headers.authorization ?? '';
-    const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
-    if (!diagSecret || !provided || !safeCompare(provided, diagSecret)) {
-      reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Secreto invalido' } });
-      return;
-    }
-
-    const query = z.object({ id: z.string().cuid() }).parse(request.query);
-    const result = await autoRespond(query.id);
-    return reply.send(result);
   });
 }
