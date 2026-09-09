@@ -46,6 +46,7 @@ const interactionForDraft = {
   status: true,
   externalId: true,
   authorExternalId: true,
+  authorName: true,
   remoteCreatedAt: true,
   firstRespondedAt: true,
   account: {
@@ -124,6 +125,7 @@ export async function createAiDraft(params: {
     campusContact,
     postCaption: interaction.post?.caption ?? null,
     kind: interaction.kind as 'COMMENT' | 'DIRECT_MESSAGE',
+    authorName: interaction.authorName,
     topic: interaction.topic,
     sentiment: interaction.sentiment,
     accountName: interaction.account.name,

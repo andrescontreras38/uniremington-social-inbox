@@ -29,6 +29,8 @@ export interface DraftInput {
   interactionText: string;
   postCaption?: string | null;
   kind: 'COMMENT' | 'DIRECT_MESSAGE';
+  /** Nombre publico de quien escribio, cuando Meta lo entrega (a veces no). */
+  authorName?: string | null;
   topic?: string | null;
   sentiment?: string | null;
   accountName?: string;
@@ -79,6 +81,7 @@ export async function generateDraft(input: DraftInput): Promise<DraftResult> {
     input.postCaption
       ? `Publicacion:\n"""${clamp(input.postCaption, MAX_CAPTION_CHARS)}"""`
       : 'Publicacion: no disponible. No supongas de que trataba.',
+    input.authorName?.trim() ? `Nombre de quien escribe: ${input.authorName.trim()}` : null,
     input.topic ? `Clasificacion: ${input.topic} / ${input.sentiment}` : null,
     // Los datos verificados van antes del mensaje: el modelo los lee como
     // material de referencia, no como parte de lo que escribio la persona.
