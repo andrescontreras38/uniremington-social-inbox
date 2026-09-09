@@ -1,7 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { request as httpRequest } from 'undici';
+import { z } from 'zod';
 import { getConfig } from '../config/env.js';
 import { safeCompare } from '../lib/crypto.js';
 import { purgeExpiredData, runExclusive } from '../jobs/scheduler.js';
+import { prisma } from '../lib/prisma.js';
+import { resolveCredentials } from '../services/social/index.js';
 import { syncAllAccounts } from '../services/sync.js';
 
 /**
@@ -60,5 +64,65 @@ export async function internalRoutes(app: FastifyInstance): Promise<void> {
     await runExclusive('retention', purgeExpiredData);
 
     return reply.send({ ok: true });
+  });
+
+  /**
+   * Diagnostico temporal: busca la respuesta PUBLISHED mas reciente cuyo
+   * texto contenga `text` y consulta directamente en la Graph API si ese
+   * comentario sigue existiendo y si Meta lo marco oculto (is_hidden). Solo
+   * para depurar el caso de respuestas que la bandeja marca publicadas pero
+   * no aparecen en Facebook/Instagram. Quitar despues de usarlo.
+   */
+  app.get('/diagnose-reply', async (request, reply) => {
+    if (!requireCronSecret(request, reply)) return;
+
+    const query = z.object({ text: z.string().min(3) }).parse(request.query);
+    const config = getConfig();
+
+    const candidate = await prisma.reply.findFirst({
+      where: {
+        status: 'PUBLISHED',
+        externalId: { not: null },
+        OR: [
+          { draftText: { contains: query.text, mode: 'insensitive' } },
+          { finalText: { contains: query.text, mode: 'insensitive' } },
+        ],
+      },
+      orderBy: { publishedAt: 'desc' },
+      include: { interaction: { include: { account: true } } },
+    });
+
+    if (!candidate) return reply.send({ found: false });
+
+    const account = candidate.interaction.account;
+    const credentials = resolveCredentials(account);
+
+    const url = new URL(
+      `${config.META_GRAPH_BASE_URL}/${config.META_GRAPH_VERSION}/${candidate.externalId}`,
+    );
+    url.searchParams.set('fields', 'id,message,is_hidden,created_time,parent,can_comment');
+    url.searchParams.set('access_token', credentials.accessToken);
+
+    const graphResponse = await httpRequest(url, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      headersTimeout: 15_000,
+      bodyTimeout: 15_000,
+    });
+    const graphBody = await graphResponse.body.json();
+
+    return reply.send({
+      found: true,
+      replyId: candidate.id,
+      interactionId: candidate.interactionId,
+      externalId: candidate.externalId,
+      autoPublished: candidate.autoPublished,
+      createdAt: candidate.createdAt,
+      approvedAt: candidate.approvedAt,
+      publishedAt: candidate.publishedAt,
+      account: { provider: account.provider, name: account.name },
+      graphStatus: graphResponse.statusCode,
+      graph: graphBody,
+    });
   });
 }
