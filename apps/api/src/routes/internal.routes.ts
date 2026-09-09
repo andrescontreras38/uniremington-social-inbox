@@ -74,7 +74,13 @@ export async function internalRoutes(app: FastifyInstance): Promise<void> {
    * no aparecen en Facebook/Instagram. Quitar despues de usarlo.
    */
   app.get('/diagnose-reply', async (request, reply) => {
-    if (!requireCronSecret(request, reply)) return;
+    const diagSecret = process.env.DIAG_SECRET ?? '';
+    const header = request.headers.authorization ?? '';
+    const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
+    if (!diagSecret || !provided || !safeCompare(provided, diagSecret)) {
+      reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Secreto invalido' } });
+      return;
+    }
 
     const query = z.object({ text: z.string().min(3) }).parse(request.query);
     const config = getConfig();
