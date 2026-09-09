@@ -486,9 +486,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Entre 15 y 45 segundos, nunca el mismo valor. */
+/**
+ * Entre 8 y 20 segundos, nunca el mismo valor.
+ *
+ * Todo esto corre dentro de UNA misma peticion serverless con limite de 60s
+ * (vercel.json). Ese limite tambien tiene que cubrir la busqueda de
+ * comentarios nuevos en la Graph API y la redaccion con IA antes de llegar
+ * aqui: un delay de hasta 45s (el valor original) dejaba muy poco margen y
+ * en la practica la funcion se cortaba a mitad de camino, dejando el borrador
+ * a medias sin publicar. Mas alla de 20s el margen vuelve a ser justo.
+ */
 function randomDelayMs(): number {
-  return 15_000 + Math.floor(Math.random() * 30_000);
+  return 8_000 + Math.floor(Math.random() * 12_000);
 }
 
 const SYSTEM_ACTOR_EMAIL = 'sistema-ia@uniremington.edu.co';
