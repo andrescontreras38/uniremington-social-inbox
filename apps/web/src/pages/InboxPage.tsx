@@ -344,8 +344,11 @@ function InteractionDetailPanel({
 
   // Al cambiar de caso se carga el borrador vigente de cada canal, si lo hay.
   useEffect(() => {
+    // FAILED cuenta como pendiente: un fallo al publicar no debe esconder el
+    // editor, sino dejarlo listo para reintentar (aprobar otra vez publica
+    // de nuevo, vease approveReply en replies.ts).
     const isPending = (reply: { status: string }) =>
-      reply.status === 'DRAFT' || reply.status === 'APPROVED';
+      reply.status === 'DRAFT' || reply.status === 'APPROVED' || reply.status === 'FAILED';
     const pendingPublic = interaction?.replies.find(
       (reply) => reply.channel !== 'PRIVATE_REPLY' && isPending(reply),
     );
@@ -684,6 +687,12 @@ function InteractionDetailPanel({
                 invalida la aprobacion.
               </p>
             ) : null}
+            {activePublic?.status === 'FAILED' ? (
+              <Notice kind="error">
+                No se pudo publicar: {activePublic.publishError ?? 'error desconocido'}. Apruebe de
+                nuevo para reintentar.
+              </Notice>
+            ) : null}
           </>
         ) : (
           <Notice kind="info">Su rol permite consultar, pero no redactar respuestas.</Notice>
@@ -735,6 +744,12 @@ function InteractionDetailPanel({
               Aprobada por {activePrivate.approvedBy?.name ?? 'un usuario'}. Editar el texto
               invalida la aprobacion.
             </p>
+          ) : null}
+          {activePrivate?.status === 'FAILED' ? (
+            <Notice kind="error">
+              No se pudo enviar: {activePrivate.publishError ?? 'error desconocido'}. Apruebe de
+              nuevo para reintentar.
+            </Notice>
           ) : null}
         </div>
       ) : null}
