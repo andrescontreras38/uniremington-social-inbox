@@ -551,17 +551,22 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Entre 8 y 20 segundos, nunca el mismo valor.
+ * Entre 5 y 10 segundos, nunca el mismo valor.
  *
  * Todo esto corre dentro de UNA misma peticion serverless con limite de 60s
- * (vercel.json). Ese limite tambien tiene que cubrir la busqueda de
- * comentarios nuevos en la Graph API y la redaccion con IA antes de llegar
- * aqui: un delay de hasta 45s (el valor original) dejaba muy poco margen y
- * en la practica la funcion se cortaba a mitad de camino, dejando el borrador
- * a medias sin publicar. Mas alla de 20s el margen vuelve a ser justo.
+ * (vercel.json, tope real del plan). Ese limite tambien tiene que cubrir la
+ * busqueda de comentarios nuevos en la Graph API, la redaccion con IA (un
+ * solo llamado, pero hasta dos bloques cuando hay seguimiento privado) y,
+ * cuando aplica, DOS publicaciones seguidas en la Graph API (la publica y la
+ * respuesta privada) en vez de una. El rango ya se recorto una vez de
+ * 15-45s a 8-20s por el mismo motivo; con el seguimiento privado sumando una
+ * llamada mas a Meta, un caso real se corto a mitad de camino con el rango
+ * anterior. Sigue siendo variable a proposito -nunca el mismo numero dos
+ * veces- para no dejar el patron de respuesta instantanea que vigilan los
+ * filtros de spam, pero el margen importa mas que estirar el numero.
  */
 function randomDelayMs(): number {
-  return 8_000 + Math.floor(Math.random() * 12_000);
+  return 5_000 + Math.floor(Math.random() * 5_000);
 }
 
 const SYSTEM_ACTOR_EMAIL = 'sistema-ia@uniremington.edu.co';
