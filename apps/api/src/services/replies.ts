@@ -687,6 +687,64 @@ export async function autoRespond(
   return { published: true };
 }
 
+/**
+ * Reintenta respuestas automaticas que quedaron redactadas/aprobadas pero
+ * nunca se publicaron: no porque Meta las rechazara (eso queda marcado
+ * FAILED y no se reintenta solo, vease publishReply), sino porque la
+ * funcion serverless se corto a mitad de camino por el limite de 60s antes
+ * de llegar a publicar. Nada indica un error real en esos casos, asi que
+ * vale la pena reintentar.
+ *
+ * Se llama desde una ruta interna (internal.routes.ts) que dispara un
+ * servicio externo cada 1-2 minutos, no desde Vercel Cron: el plan Hobby
+ * de este proyecto solo permite cron una vez al dia, insuficiente aqui.
+ *
+ * El margen de 90s evita tocar una interaccion cuya propia peticion de
+ * autoRespond todavia podria estar en curso (con su propio delay antispam).
+ */
+export async function retryStuckAutoResponses(): Promise<{
+  found: number;
+  published: number;
+}> {
+  const threshold = new Date(Date.now() - 90_000);
+
+  const stuck = await prisma.reply.findMany({
+    where: {
+      autoPublished: true,
+      status: { in: ['DRAFT', 'APPROVED'] },
+      createdAt: { lt: threshold },
+    },
+    select: { id: true, interactionId: true },
+  });
+
+  if (stuck.length === 0) return { found: 0, published: 0 };
+
+  const actor = await getSystemActor();
+  let published = 0;
+
+  for (const { id, interactionId } of stuck) {
+    try {
+      await approveReply({ replyId: id, actor });
+      await publishReply({ replyId: id, actor });
+      published += 1;
+    } catch (error) {
+      // publishReply ya deja la respuesta en FAILED y registra la alerta;
+      // aqui solo se anota para el resumen del reintento, sin volver a
+      // intentarlo en la misma corrida.
+      logger.warn(
+        {
+          interactionId,
+          replyId: id,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'Reintento de auto-respuesta atascada fallo',
+      );
+    }
+  }
+
+  return { found: stuck.length, published };
+}
+
 function normalizeReplyText(text: string | null | undefined): string {
   const value = (text ?? '').replace(/\s+\n/g, '\n').trim();
 
