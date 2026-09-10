@@ -221,6 +221,10 @@ model Reply {
   status String @default("DRAFT")
   // AI_DRAFT | HUMAN
   origin String @default("AI_DRAFT")
+  // PUBLIC (comentario visible) | PRIVATE_REPLY (respuesta privada de Meta
+  // al mismo comentario, no aparece en el feed). Solo una interaccion de
+  // tipo COMMENT puede tener una respuesta PRIVATE_REPLY hermana.
+  channel String @default("PUBLIC")
 
   // Texto propuesto por la IA, conservado para auditoria aunque se edite
   draftText String

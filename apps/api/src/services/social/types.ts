@@ -107,6 +107,18 @@ export interface SocialProvider {
     message: string,
   ): Promise<{ externalId: string }>;
 
+  /**
+   * Respuesta privada de Meta a un comentario (Private Replies): un mensaje
+   * directo ligado a ese comentario puntual, sin publicar nada nuevo en el
+   * feed. Meta admite como maximo una por comentario dentro de los 7 dias
+   * siguientes a que se escribio.
+   */
+  sendPrivateReply(
+    account: AccountCredentials,
+    commentExternalId: string,
+    message: string,
+  ): Promise<{ externalId: string }>;
+
   /** Oculta o vuelve a mostrar un comentario. */
   setCommentHidden(
     account: AccountCredentials,

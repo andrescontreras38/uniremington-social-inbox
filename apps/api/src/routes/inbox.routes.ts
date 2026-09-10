@@ -156,6 +156,7 @@ export async function inboxRoutes(app: FastifyInstance): Promise<void> {
             id: true,
             status: true,
             origin: true,
+            channel: true,
             draftText: true,
             finalText: true,
             rejectionReason: true,

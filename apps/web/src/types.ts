@@ -61,6 +61,7 @@ export interface Reply {
   id: string;
   status: ReplyStatus;
   origin: 'AI_DRAFT' | 'HUMAN';
+  channel: 'PUBLIC' | 'PRIVATE_REPLY';
   draftText: string;
   finalText: string | null;
   rejectionReason: string | null;

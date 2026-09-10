@@ -51,7 +51,7 @@ export async function replyRoutes(app: FastifyInstance): Promise<void> {
         context: auditContextOf(request),
       });
 
-      return { reply: draft };
+      return { reply: draft, privateReply: draft.privateReply ?? null };
     },
   );
 

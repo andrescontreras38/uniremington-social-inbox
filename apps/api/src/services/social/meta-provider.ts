@@ -411,6 +411,26 @@ export class MetaProvider implements SocialProvider {
     return { externalId: response.id ?? '' };
   }
 
+  /**
+   * Private Replies: respuesta privada de Meta a un comentario puntual.
+   * Distinto de publishReply con kind DIRECT_MESSAGE (que exige una
+   * conversacion de Messenger ya abierta con el autor): esta se dirige por
+   * el propio comentario, con su mismo id.
+   */
+  async sendPrivateReply(
+    account: AccountCredentials,
+    commentExternalId: string,
+    message: string,
+  ): Promise<{ externalId: string }> {
+    const response = await this.graphPost<{ id?: string }>(
+      `/${commentExternalId}/private_replies`,
+      account.accessToken,
+      { message },
+    );
+
+    return { externalId: response.id ?? '' };
+  }
+
   async setCommentHidden(
     account: AccountCredentials,
     commentExternalId: string,

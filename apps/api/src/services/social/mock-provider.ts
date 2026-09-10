@@ -129,6 +129,19 @@ export class MockProvider implements SocialProvider {
     return { externalId: `mock_reply_${randomUUID()}` };
   }
 
+  async sendPrivateReply(
+    _account: AccountCredentials,
+    commentExternalId: string,
+    message: string,
+  ): Promise<{ externalId: string }> {
+    this.published.push({ target: `private:${commentExternalId}`, message, at: new Date() });
+    logger.info(
+      { target: commentExternalId, length: message.length },
+      'Respuesta privada enviada (proveedor simulado)',
+    );
+    return { externalId: `mock_private_${randomUUID()}` };
+  }
+
   async setCommentHidden(
     _account: AccountCredentials,
     commentExternalId: string,

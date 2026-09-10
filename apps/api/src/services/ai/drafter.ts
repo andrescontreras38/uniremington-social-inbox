@@ -23,7 +23,10 @@ import {
 /** Limites de recorte y de salida, para acotar el costo por borrador. */
 const MAX_TEXT_CHARS = 1200;
 const MAX_CAPTION_CHARS = 400;
-const MAX_OUTPUT_TOKENS = 400;
+// 400 alcanza de sobra para un solo texto; con seguimiento privado el
+// modelo devuelve dos bloques, asi que el techo sube. Es un limite, no un
+// costo: solo se paga lo que el modelo realmente produce.
+const MAX_OUTPUT_TOKENS = 600;
 
 export interface DraftInput {
   interactionText: string;
@@ -40,6 +43,14 @@ export interface DraftInput {
   verifiedData?: string | null;
   /** Bloque de contacto de sede armado por services/contacts.ts. */
   campusContact?: string | null;
+  /**
+   * Verdadero cuando hay un dato (enlace, precio no publico o contacto de
+   * sede) que la regla 9 le prohibe dar en un comentario publico, y por lo
+   * tanto vale la pena un seguimiento automatico por Private Reply. Se
+   * decide en replies.ts a partir de los mismos datos verificados, no lo
+   * infiere el modelo.
+   */
+  allowPrivateFollowUp?: boolean;
   /** Resultado de evaluatePolicy para esta interaccion. */
   allowAssistedDraft: boolean;
   policyReasons?: string[];
@@ -47,7 +58,32 @@ export interface DraftInput {
 
 export interface DraftResult {
   text: string;
+  /** Presente solo cuando el modelo devolvio tambien un bloque RESPUESTA_PRIVADA. */
+  privateText?: string;
   usage: AiUsage;
+}
+
+const PUBLIC_MARKER = 'RESPUESTA_PUBLICA:';
+const PRIVATE_MARKER = 'RESPUESTA_PRIVADA:';
+
+/**
+ * Separa el texto del modelo en publico/privado cuando sigue el formato de
+ * la regla 10. Si no lo sigue al pie de la letra (el modelo lo omitio o lo
+ * deformo), se trata todo como un unico texto publico: es el comportamiento
+ * seguro, igual que si nunca se hubiera pedido el seguimiento privado.
+ */
+function splitDualResponse(text: string): { text: string; privateText?: string } {
+  const publicIndex = text.indexOf(PUBLIC_MARKER);
+  const privateIndex = text.indexOf(PRIVATE_MARKER);
+  if (publicIndex === -1 || privateIndex === -1 || privateIndex < publicIndex) {
+    return { text };
+  }
+
+  const publicText = text.slice(publicIndex + PUBLIC_MARKER.length, privateIndex).trim();
+  const privateText = text.slice(privateIndex + PRIVATE_MARKER.length).trim();
+  if (!publicText || !privateText) return { text };
+
+  return { text: publicText, privateText };
 }
 
 export async function generateDraft(input: DraftInput): Promise<DraftResult> {
@@ -87,6 +123,7 @@ export async function generateDraft(input: DraftInput): Promise<DraftResult> {
     // material de referencia, no como parte de lo que escribio la persona.
     input.verifiedData ?? null,
     input.campusContact ?? null,
+    input.allowPrivateFollowUp ? 'SEGUIMIENTO_PRIVADO_DISPONIBLE' : null,
     `Mensaje de la persona:\n"""${clamp(input.interactionText, MAX_TEXT_CHARS)}"""`,
     buildDraftInstruction(input.adjustment),
   ]
@@ -122,8 +159,13 @@ export async function generateDraft(input: DraftInput): Promise<DraftResult> {
     throw new PolicyViolationError('El modelo no devolvio texto utilizable para el borrador');
   }
 
+  const { text: publicText, privateText } = input.allowPrivateFollowUp
+    ? splitDualResponse(text)
+    : { text, privateText: undefined };
+
   return {
-    text,
+    text: publicText,
+    privateText,
     usage: {
       model,
       inputTokens: response.usage.input_tokens,

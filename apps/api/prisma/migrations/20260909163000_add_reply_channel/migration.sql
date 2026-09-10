@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Reply" ADD COLUMN     "channel" TEXT NOT NULL DEFAULT 'PUBLIC';

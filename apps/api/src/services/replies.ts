@@ -86,7 +86,7 @@ export async function createAiDraft(params: {
   actor: ActorInfo;
   adjustment?: DraftToneAdjustment;
   context?: AuditContext;
-}): Promise<{ id: string; text: string }> {
+}): Promise<{ id: string; text: string; privateReply?: { id: string; text: string } }> {
   const interaction = await loadInteraction(params.interactionId);
 
   if (interaction.requiresHuman) {
@@ -117,7 +117,20 @@ export async function createAiDraft(params: {
 
   // Contacto real de esa sede: lo que el redactor ofrece cuando no tiene el
   // dato exacto, en vez de un generico "escriba por mensaje directo".
-  const campusContact = buildContactContext(await findCampusContact(campus));
+  const campusContactMatch = await findCampusContact(campus);
+  const campusContact = buildContactContext(campusContactMatch);
+
+  // Solo tiene sentido un seguimiento privado cuando hay un dato VERIFICADO
+  // y concreto que la regla 9 le prohibe dar en un comentario publico: un
+  // enlace oficial o un precio marcado como no publico. Que exista un
+  // contacto de sede no basta por si solo -la regla 9 ya le pide al modelo
+  // dar como mucho el nombre del asesor en publico, sin correo ni telefono-,
+  // asi que no se dispara un seguimiento privado por eso: se reservaria para
+  // casos donde de verdad hace falta. Un mensaje directo ya es privado de
+  // por si, asi que nunca lo necesita.
+  const hasGatedPrice = templates.some((t) => t.semesterValue !== null && !t.costIsPublic);
+  const hasOfficialUrl = templates.some((t) => Boolean(t.officialUrl));
+  const allowPrivateFollowUp = interaction.kind === 'COMMENT' && (hasGatedPrice || hasOfficialUrl);
 
   const draft = await generateDraft({
     interactionText: interaction.text,
@@ -132,6 +145,7 @@ export async function createAiDraft(params: {
     tone: await activeTone(),
     adjustment: params.adjustment,
     allowAssistedDraft: true,
+    allowPrivateFollowUp,
   });
 
   const reply = await prisma.reply.create({
@@ -139,6 +153,7 @@ export async function createAiDraft(params: {
       interactionId: interaction.id,
       status: 'DRAFT',
       origin: 'AI_DRAFT',
+      channel: 'PUBLIC',
       draftText: draft.text,
       finalText: draft.text,
       createdById: params.actor.id,
@@ -148,6 +163,27 @@ export async function createAiDraft(params: {
     },
     select: { id: true, draftText: true },
   });
+
+  // El costo del modelo ya quedo atribuido a la respuesta publica arriba:
+  // fue UNA sola llamada que redacto los dos textos, asi que la privada no
+  // repite aiInputTokens/aiOutputTokens (duplicaria el costo en el tablero).
+  let privateReply: { id: string; text: string } | undefined;
+  if (draft.privateText) {
+    const createdPrivate = await prisma.reply.create({
+      data: {
+        interactionId: interaction.id,
+        status: 'DRAFT',
+        origin: 'AI_DRAFT',
+        channel: 'PRIVATE_REPLY',
+        draftText: draft.privateText,
+        finalText: draft.privateText,
+        createdById: params.actor.id,
+        aiModel: draft.usage.model,
+      },
+      select: { id: true, draftText: true },
+    });
+    privateReply = { id: createdPrivate.id, text: createdPrivate.draftText };
+  }
 
   await prisma.interaction.update({
     where: { id: interaction.id },
@@ -163,7 +199,23 @@ export async function createAiDraft(params: {
     context: params.context,
   });
 
-  return { id: reply.id, text: reply.draftText };
+  if (privateReply) {
+    await recordAudit({
+      actor: params.actor,
+      action: 'reply.drafted',
+      entityType: 'Reply',
+      entityId: privateReply.id,
+      metadata: {
+        interactionId: interaction.id,
+        origin: 'AI_DRAFT',
+        model: draft.usage.model,
+        channel: 'PRIVATE_REPLY',
+      },
+      context: params.context,
+    });
+  }
+
+  return { id: reply.id, text: reply.draftText, privateReply };
 }
 
 /** Crea un borrador escrito a mano. Siempre permitido, incluso en casos sensibles. */
@@ -368,6 +420,7 @@ export async function publishReply(params: {
     select: {
       id: true,
       status: true,
+      channel: true,
       approvedById: true,
       approvedAt: true,
       finalText: true,
@@ -392,28 +445,39 @@ export async function publishReply(params: {
     );
   }
 
-  // Un ultimo filtro antes de que el texto salga a un canal publico.
-  const outgoingPii = scanPii(reply.finalText);
-  if (outgoingPii.flags.length > 0) {
-    throw new PolicyViolationError(
-      `La respuesta contiene datos personales (${outgoingPii.flags.join(', ')}). Retirelos o continue por mensaje directo.`,
-    );
+  const interaction = reply.interaction;
+
+  // Un ultimo filtro antes de que el texto salga a un canal publico. No
+  // aplica a un mensaje directo ni a una respuesta privada (PRIVATE_REPLY):
+  // ahi es normal y esperado citar el correo o el telefono de un asesor; ese
+  // dato solo es un riesgo cuando el canal es un comentario visible por
+  // cualquiera.
+  const isPrivateChannel = reply.channel === 'PRIVATE_REPLY' || interaction.kind === 'DIRECT_MESSAGE';
+  if (!isPrivateChannel) {
+    const outgoingPii = scanPii(reply.finalText);
+    if (outgoingPii.flags.length > 0) {
+      throw new PolicyViolationError(
+        `La respuesta contiene datos personales (${outgoingPii.flags.join(', ')}). Retirelos o continue por mensaje directo.`,
+      );
+    }
   }
 
-  const interaction = reply.interaction;
   const provider = getSocialProvider();
   const credentials = resolveCredentials(interaction.account);
 
   try {
-    const published = await provider.publishReply(
-      credentials,
-      {
-        kind: interaction.kind as 'COMMENT' | 'DIRECT_MESSAGE',
-        externalId: interaction.externalId,
-        authorExternalId: interaction.authorExternalId ?? undefined,
-      },
-      reply.finalText,
-    );
+    const published =
+      reply.channel === 'PRIVATE_REPLY'
+        ? await provider.sendPrivateReply(credentials, interaction.externalId, reply.finalText)
+        : await provider.publishReply(
+            credentials,
+            {
+              kind: interaction.kind as 'COMMENT' | 'DIRECT_MESSAGE',
+              externalId: interaction.externalId,
+              authorExternalId: interaction.authorExternalId ?? undefined,
+            },
+            reply.finalText,
+          );
 
     const now = new Date();
     const firstResponse = interaction.firstRespondedAt ?? now;
@@ -559,10 +623,16 @@ export async function autoRespond(
 
   const actor = await getSystemActor();
 
-  let draft: { id: string; text: string };
+  let draft: { id: string; text: string; privateReply?: { id: string; text: string } };
   try {
     draft = await createAiDraft({ interactionId, actor });
     await prisma.reply.update({ where: { id: draft.id }, data: { autoPublished: true } });
+    if (draft.privateReply) {
+      await prisma.reply.update({
+        where: { id: draft.privateReply.id },
+        data: { autoPublished: true },
+      });
+    }
   } catch (error) {
     logger.warn(
       { interactionId, err: error instanceof Error ? error.message : String(error) },
@@ -580,7 +650,6 @@ export async function autoRespond(
     await sleep(randomDelayMs());
     await approveReply({ replyId: draft.id, actor });
     await publishReply({ replyId: draft.id, actor });
-    return { published: true };
   } catch (error) {
     logger.warn(
       { interactionId, replyId: draft.id, err: error instanceof Error ? error.message : String(error) },
@@ -588,6 +657,29 @@ export async function autoRespond(
     );
     return { published: false, reason: 'publish_failed' };
   }
+
+  if (draft.privateReply) {
+    // Sin retraso adicional: es una respuesta privada (Private Reply de
+    // Meta), no aparece en el feed publico, asi que no la vigila el mismo
+    // filtro de velocidad que un comentario visible. Si falla, no se
+    // reintenta ni se deshace la publicacion publica que ya salio: el
+    // seguimiento privado queda pendiente para que una persona lo revise.
+    try {
+      await approveReply({ replyId: draft.privateReply.id, actor });
+      await publishReply({ replyId: draft.privateReply.id, actor });
+    } catch (error) {
+      logger.warn(
+        {
+          interactionId,
+          replyId: draft.privateReply.id,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'La respuesta publica se publico, pero fallo el seguimiento privado; queda pendiente para revision',
+      );
+    }
+  }
+
+  return { published: true };
 }
 
 function normalizeReplyText(text: string | null | undefined): string {

@@ -70,6 +70,16 @@ export const REPLY_ORIGINS = ['AI_DRAFT', 'HUMAN'] as const;
 export const ReplyOrigin = z.enum(REPLY_ORIGINS);
 export type ReplyOrigin = (typeof REPLY_ORIGINS)[number];
 
+/**
+ * PUBLIC: comentario visible bajo la publicacion.
+ * PRIVATE_REPLY: respuesta privada de Meta al mismo comentario (Private
+ * Replies), un mensaje 1 a 1 que no aparece en el feed. Solo aplica a
+ * interacciones de tipo COMMENT.
+ */
+export const REPLY_CHANNELS = ['PUBLIC', 'PRIVATE_REPLY'] as const;
+export const ReplyChannel = z.enum(REPLY_CHANNELS);
+export type ReplyChannel = (typeof REPLY_CHANNELS)[number];
+
 export const ALERT_TYPES = [
   'URGENT_INTERACTION',
   'NEGATIVE_SPIKE',

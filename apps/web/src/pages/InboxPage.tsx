@@ -325,8 +325,12 @@ function InteractionDetailPanel({
 }) {
   const { can } = useAuth();
   const queryClient = useQueryClient();
-  const [draftText, setDraftText] = useState('');
-  const [activeReplyId, setActiveReplyId] = useState<string | null>(null);
+  const [publicText, setPublicText] = useState('');
+  const [activePublicId, setActivePublicId] = useState<string | null>(null);
+  // Seguimiento privado (Private Reply): solo existe cuando el borrador de
+  // la IA decidio que hacia falta uno, vease services/replies.ts.
+  const [privateText, setPrivateText] = useState('');
+  const [activePrivateId, setActivePrivateId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ kind: 'info' | 'error' | 'warning'; text: string } | null>(
     null,
   );
@@ -338,13 +342,20 @@ function InteractionDetailPanel({
 
   const interaction = detailQuery.data?.interaction;
 
-  // Al cambiar de caso se carga el borrador vigente, si lo hay.
+  // Al cambiar de caso se carga el borrador vigente de cada canal, si lo hay.
   useEffect(() => {
-    const pending = interaction?.replies.find(
-      (reply) => reply.status === 'DRAFT' || reply.status === 'APPROVED',
+    const isPending = (reply: { status: string }) =>
+      reply.status === 'DRAFT' || reply.status === 'APPROVED';
+    const pendingPublic = interaction?.replies.find(
+      (reply) => reply.channel !== 'PRIVATE_REPLY' && isPending(reply),
     );
-    setActiveReplyId(pending?.id ?? null);
-    setDraftText(pending?.finalText ?? pending?.draftText ?? '');
+    const pendingPrivate = interaction?.replies.find(
+      (reply) => reply.channel === 'PRIVATE_REPLY' && isPending(reply),
+    );
+    setActivePublicId(pendingPublic?.id ?? null);
+    setPublicText(pendingPublic?.finalText ?? pendingPublic?.draftText ?? '');
+    setActivePrivateId(pendingPrivate?.id ?? null);
+    setPrivateText(pendingPrivate?.finalText ?? pendingPrivate?.draftText ?? '');
     setMessage(null);
   }, [interaction]);
 
@@ -362,14 +373,24 @@ function InteractionDetailPanel({
 
   const aiDraft = useMutation({
     mutationFn: (style?: string) =>
-      apiFetch<{ reply: { id: string; text: string } }>(
-        `/replies/interactions/${interactionId}/draft`,
-        { method: 'POST', body: style ? { style } : {} },
-      ),
+      apiFetch<{
+        reply: { id: string; text: string };
+        privateReply: { id: string; text: string } | null;
+      }>(`/replies/interactions/${interactionId}/draft`, {
+        method: 'POST',
+        body: style ? { style } : {},
+      }),
     onSuccess: (data) => {
-      setActiveReplyId(data.reply.id);
-      setDraftText(data.reply.text);
-      setMessage({ kind: 'info', text: 'Borrador generado. Reviselo antes de aprobar.' });
+      setActivePublicId(data.reply.id);
+      setPublicText(data.reply.text);
+      setActivePrivateId(data.privateReply?.id ?? null);
+      setPrivateText(data.privateReply?.text ?? '');
+      setMessage({
+        kind: 'info',
+        text: data.privateReply
+          ? 'Borrador generado, con seguimiento privado. Revise los dos antes de aprobar.'
+          : 'Borrador generado. Reviselo antes de aprobar.',
+      });
       refresh();
     },
     onError: handleError,
@@ -382,7 +403,7 @@ function InteractionDetailPanel({
         body: { text },
       }),
     onSuccess: (data) => {
-      setActiveReplyId(data.reply.id);
+      setActivePublicId(data.reply.id);
       setMessage({ kind: 'info', text: 'Borrador guardado.' });
       refresh();
     },
@@ -390,8 +411,8 @@ function InteractionDetailPanel({
   });
 
   const approve = useMutation({
-    mutationFn: (replyId: string) =>
-      apiFetch(`/replies/${replyId}/approve`, { method: 'POST', body: { text: draftText } }),
+    mutationFn: ({ replyId, text }: { replyId: string; text: string }) =>
+      apiFetch(`/replies/${replyId}/approve`, { method: 'POST', body: { text } }),
     onSuccess: () => {
       setMessage({ kind: 'info', text: 'Respuesta aprobada. Ya puede publicarse.' });
       refresh();
@@ -437,10 +458,16 @@ function InteractionDetailPanel({
     );
   }
 
-  const activeReply = interaction.replies.find((reply) => reply.id === activeReplyId) ?? null;
-  // La mas reciente ya publicada: es lo primero que alguien quiere ver al
-  // abrir un caso ya cerrado, sin tener que bajar hasta el Historial.
-  const publishedReply = interaction.replies.find((reply) => reply.status === 'PUBLISHED') ?? null;
+  const activePublic = interaction.replies.find((reply) => reply.id === activePublicId) ?? null;
+  const activePrivate = interaction.replies.find((reply) => reply.id === activePrivateId) ?? null;
+  // La mas reciente ya publicada de cada canal: es lo primero que alguien
+  // quiere ver al abrir un caso ya cerrado, sin tener que bajar al Historial.
+  const publishedPublic =
+    interaction.replies.find((reply) => reply.channel !== 'PRIVATE_REPLY' && reply.status === 'PUBLISHED') ??
+    null;
+  const publishedPrivate =
+    interaction.replies.find((reply) => reply.channel === 'PRIVATE_REPLY' && reply.status === 'PUBLISHED') ??
+    null;
   const piiFlags = interaction.piiFlags?.split(',').filter(Boolean) ?? [];
   const busy =
     aiDraft.isPending || manualDraft.isPending || approve.isPending || publish.isPending;
@@ -505,27 +532,52 @@ function InteractionDetailPanel({
         ) : null}
       </div>
 
-      {publishedReply ? (
+      {publishedPublic ? (
         <div className="detail__section detail__published">
           <div className="detail__published-head">
             <strong>Respuesta publicada</strong>
-            {publishedReply.autoPublished ? (
+            {publishedPublic.autoPublished ? (
               <Badge tone="info" title="La IA la aprobo y publico sola, sin revision humana">
                 Automática
               </Badge>
             ) : (
               <span className="muted" style={{ fontSize: '0.78rem' }}>
-                aprobada por {publishedReply.approvedBy?.name ?? 'un usuario'}
+                aprobada por {publishedPublic.approvedBy?.name ?? 'un usuario'}
               </span>
             )}
-            {publishedReply.publishedAt ? (
+            {publishedPublic.publishedAt ? (
               <span className="muted" style={{ fontSize: '0.78rem' }}>
-                · {timeAgo(publishedReply.publishedAt)}
+                · {timeAgo(publishedPublic.publishedAt)}
               </span>
             ) : null}
           </div>
           <div className="detail__comment detail__comment--reply">
-            {publishedReply.finalText ?? publishedReply.draftText}
+            {publishedPublic.finalText ?? publishedPublic.draftText}
+          </div>
+        </div>
+      ) : null}
+
+      {publishedPrivate ? (
+        <div className="detail__section detail__published">
+          <div className="detail__published-head">
+            <strong>Seguimiento privado enviado</strong>
+            {publishedPrivate.autoPublished ? (
+              <Badge tone="info" title="La IA la aprobo y publico sola, sin revision humana">
+                Automática
+              </Badge>
+            ) : (
+              <span className="muted" style={{ fontSize: '0.78rem' }}>
+                aprobada por {publishedPrivate.approvedBy?.name ?? 'un usuario'}
+              </span>
+            )}
+            {publishedPrivate.publishedAt ? (
+              <span className="muted" style={{ fontSize: '0.78rem' }}>
+                · {timeAgo(publishedPrivate.publishedAt)}
+              </span>
+            ) : null}
+          </div>
+          <div className="detail__comment detail__comment--reply">
+            {publishedPrivate.finalText ?? publishedPrivate.draftText}
           </div>
         </div>
       ) : null}
@@ -552,8 +604,8 @@ function InteractionDetailPanel({
         {can('reply:draft') ? (
           <>
             <textarea
-              value={draftText}
-              onChange={(event) => setDraftText(event.target.value)}
+              value={publicText}
+              onChange={(event) => setPublicText(event.target.value)}
               placeholder={
                 interaction.requiresHuman
                   ? 'Escriba la respuesta. Este caso no admite borrador asistido.'
@@ -562,7 +614,7 @@ function InteractionDetailPanel({
               maxLength={2000}
             />
             <div className="muted" style={{ fontSize: '0.75rem', textAlign: 'right' }}>
-              {draftText.length} / 2000
+              {publicText.length} / 2000
             </div>
 
             <div className="actions">
@@ -593,27 +645,27 @@ function InteractionDetailPanel({
 
               <button
                 type="button"
-                onClick={() => manualDraft.mutate(draftText)}
-                disabled={busy || draftText.trim().length === 0}
+                onClick={() => manualDraft.mutate(publicText)}
+                disabled={busy || publicText.trim().length === 0}
               >
                 Guardar borrador
               </button>
 
-              {can('reply:approve') && activeReply && activeReply.status !== 'PUBLISHED' ? (
+              {can('reply:approve') && activePublic && activePublic.status !== 'PUBLISHED' ? (
                 <button
                   type="button"
-                  onClick={() => approve.mutate(activeReply.id)}
-                  disabled={busy || draftText.trim().length === 0}
+                  onClick={() => approve.mutate({ replyId: activePublic.id, text: publicText })}
+                  disabled={busy || publicText.trim().length === 0}
                 >
                   Aprobar
                 </button>
               ) : null}
 
-              {can('reply:publish') && activeReply?.status === 'APPROVED' ? (
+              {can('reply:publish') && activePublic?.status === 'APPROVED' ? (
                 <button
                   type="button"
                   className="primary"
-                  onClick={() => publish.mutate(activeReply.id)}
+                  onClick={() => publish.mutate(activePublic.id)}
                   disabled={busy}
                 >
                   {publish.isPending ? 'Publicando...' : 'Publicar'}
@@ -621,14 +673,14 @@ function InteractionDetailPanel({
               ) : null}
             </div>
 
-            {activeReply?.status === 'DRAFT' && can('reply:approve') ? (
+            {activePublic?.status === 'DRAFT' && can('reply:approve') ? (
               <p className="muted" style={{ fontSize: '0.78rem' }}>
                 Al aprobar queda registrado su nombre como responsable del texto publicado.
               </p>
             ) : null}
-            {activeReply?.status === 'APPROVED' ? (
+            {activePublic?.status === 'APPROVED' ? (
               <p className="muted" style={{ fontSize: '0.78rem' }}>
-                Aprobada por {activeReply.approvedBy?.name ?? 'un usuario'}. Editar el texto
+                Aprobada por {activePublic.approvedBy?.name ?? 'un usuario'}. Editar el texto
                 invalida la aprobacion.
               </p>
             ) : null}
@@ -637,6 +689,55 @@ function InteractionDetailPanel({
           <Notice kind="info">Su rol permite consultar, pero no redactar respuestas.</Notice>
         )}
       </div>
+
+      {activePrivateId && can('reply:draft') ? (
+        <div className="detail__section">
+          <h3 style={{ marginBottom: 4 }}>Seguimiento privado</h3>
+          <p className="muted" style={{ fontSize: '0.78rem', marginTop: 0 }}>
+            Se envia como respuesta privada de Meta a este mismo comentario: un mensaje 1 a 1, no
+            aparece en el feed. Aqui va el dato que el comentario publico no puede dar (enlace,
+            precio o contacto del asesor).
+          </p>
+          <textarea
+            value={privateText}
+            onChange={(event) => setPrivateText(event.target.value)}
+            maxLength={2000}
+          />
+          <div className="muted" style={{ fontSize: '0.75rem', textAlign: 'right' }}>
+            {privateText.length} / 2000
+          </div>
+
+          <div className="actions">
+            {can('reply:approve') && activePrivate && activePrivate.status !== 'PUBLISHED' ? (
+              <button
+                type="button"
+                onClick={() => approve.mutate({ replyId: activePrivate.id, text: privateText })}
+                disabled={busy || privateText.trim().length === 0}
+              >
+                Aprobar
+              </button>
+            ) : null}
+
+            {can('reply:publish') && activePrivate?.status === 'APPROVED' ? (
+              <button
+                type="button"
+                className="primary"
+                onClick={() => publish.mutate(activePrivate.id)}
+                disabled={busy}
+              >
+                {publish.isPending ? 'Enviando...' : 'Enviar en privado'}
+              </button>
+            ) : null}
+          </div>
+
+          {activePrivate?.status === 'APPROVED' ? (
+            <p className="muted" style={{ fontSize: '0.78rem' }}>
+              Aprobada por {activePrivate.approvedBy?.name ?? 'un usuario'}. Editar el texto
+              invalida la aprobacion.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="detail__section">
         <h3 style={{ marginBottom: 8 }}>Acciones</h3>
@@ -684,6 +785,7 @@ function InteractionDetailPanel({
             {interaction.replies.map((reply) => (
               <li key={reply.id}>
                 <strong>{REPLY_STATUS_LABEL[reply.status] ?? reply.status}</strong>
+                {reply.channel === 'PRIVATE_REPLY' ? ' · seguimiento privado' : ' · comentario publico'}
                 {reply.origin === 'AI_DRAFT' ? ' · borrador de IA' : ' · escrito a mano'}
                 {reply.autoPublished ? (
                   <Badge tone="info" title="La IA la aprobo y publico sola, sin revision humana">
