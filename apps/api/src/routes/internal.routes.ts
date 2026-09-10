@@ -1,7 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { request as httpRequest } from 'undici';
+import { z } from 'zod';
 import { getConfig } from '../config/env.js';
 import { safeCompare } from '../lib/crypto.js';
 import { purgeExpiredData, runExclusive } from '../jobs/scheduler.js';
+import { prisma } from '../lib/prisma.js';
+import { resolveCredentials } from '../services/social/index.js';
 import { syncAllAccounts } from '../services/sync.js';
 
 /**
@@ -60,5 +64,61 @@ export async function internalRoutes(app: FastifyInstance): Promise<void> {
     await runExclusive('retention', purgeExpiredData);
 
     return reply.send({ ok: true });
+  });
+
+  /**
+   * Diagnostico temporal: consulta directo en la Graph API el estado real
+   * (is_hidden, existencia) de un comentario por su externalId, usando las
+   * credenciales reales de la cuenta ya resueltas en el propio servidor
+   * (evita depender de leer ENCRYPTION_KEY o CRON_SECRET de vuelta, que
+   * Vercel marca como sensibles y no deja leer localmente). Secreto propio
+   * (DIAG_SECRET) en vez de CRON_SECRET por el mismo motivo. Quitar esta
+   * ruta despues de usarla.
+   */
+  app.get('/diagnose-comment', async (request, reply) => {
+    const diagSecret = process.env.DIAG_SECRET ?? '';
+    const header = request.headers.authorization ?? '';
+    const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
+    if (!diagSecret || !provided || !safeCompare(provided, diagSecret)) {
+      reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Secreto invalido' } });
+      return;
+    }
+
+    const query = z.object({ externalId: z.string().min(3) }).parse(request.query);
+    const config = getConfig();
+
+    const candidate = await prisma.reply.findFirst({
+      where: { externalId: query.externalId },
+      include: { interaction: { include: { account: true } } },
+    });
+
+    if (!candidate) return reply.send({ found: false });
+
+    const account = candidate.interaction.account;
+    const credentials = resolveCredentials(account);
+
+    const url = new URL(
+      `${config.META_GRAPH_BASE_URL}/${config.META_GRAPH_VERSION}/${query.externalId}`,
+    );
+    url.searchParams.set('fields', 'id,message,is_hidden,created_time,parent,can_comment');
+    url.searchParams.set('access_token', credentials.accessToken);
+
+    const graphResponse = await httpRequest(url, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      headersTimeout: 15_000,
+      bodyTimeout: 15_000,
+    });
+    const graphBody = await graphResponse.body.json();
+
+    return reply.send({
+      found: true,
+      replyId: candidate.id,
+      channel: candidate.channel,
+      status: candidate.status,
+      account: { provider: account.provider, name: account.name },
+      graphStatus: graphResponse.statusCode,
+      graph: graphBody,
+    });
   });
 }

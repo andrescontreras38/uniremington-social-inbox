@@ -416,12 +416,34 @@ export class MetaProvider implements SocialProvider {
    * Distinto de publishReply con kind DIRECT_MESSAGE (que exige una
    * conversacion de Messenger ya abierta con el autor): esta se dirige por
    * el propio comentario, con su mismo id.
+   *
+   * Instagram e Facebook lo implementan distinto:
+   *  - Instagram: edge /private_replies sobre el propio comentario.
+   *  - Facebook: no tiene ese edge (Meta devuelve "Unsupported post
+   *    request... does not support this operation"). La respuesta privada
+   *    sale por la API de Mensajes de Messenger, dirigida al comment_id en
+   *    vez de a la persona -el mismo endpoint que usa publishReply para
+   *    DIRECT_MESSAGE, pero con `recipient.comment_id` en lugar de
+   *    `recipient.id`.
    */
   async sendPrivateReply(
     account: AccountCredentials,
     commentExternalId: string,
     message: string,
   ): Promise<{ externalId: string }> {
+    if (account.provider === 'META_FACEBOOK') {
+      const response = await this.graphPost<{ message_id?: string }>(
+        `/${account.externalId}/messages`,
+        account.accessToken,
+        {
+          recipient: { comment_id: commentExternalId },
+          message: { text: message },
+        },
+      );
+
+      return { externalId: response.message_id ?? '' };
+    }
+
     const response = await this.graphPost<{ id?: string }>(
       `/${commentExternalId}/private_replies`,
       account.accessToken,
